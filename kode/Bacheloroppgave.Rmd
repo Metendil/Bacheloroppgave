@@ -1,0 +1,4186 @@
+---
+title: "Bacheloroppgave"
+author: "Oliver Hagaseth Mydske"
+date: '15/01/2023'
+output: pdf_document
+---
+
+
+# Snarvei til data
+
+```{r}
+# Pakker
+
+library(interactions)
+library(scales)
+library(plm)
+library(ggthemes)
+library(readxl)
+library(stargazer)
+library(ggrepel)
+library(plyr)
+library(tidyverse)
+
+# Tre desimaler
+
+options(scipen=999)
+
+# Data 
+
+ekte_data <- read_excel("ekte_data.xlsx", 
+                              skip = 0)
+
+ekte_data <- ekte_data %>% 
+  arrange(kode) %>% 
+  mutate(logutslipp = log(utslipp*1000),
+         sysselsetting = 1-sysselsetting)
+```
+
+
+```{r}
+# Skalert regresjonsdata
+
+regresjon_skalert <- 
+  ekte_data %>% 
+  mutate(medianinntekt = inntekt_median, #Variabler kan ikke ha understrek
+         justertmedianinntekt = justert_inntekt_median,
+         gjennomsnittsinntekt = inntekt_gjennomsnitt,
+         justertgjennomsnittsinntekt = justert_inntekt_gjennomsnitt,
+         justertsysselsetting = justert_sysselsetting,
+         ytrevenstre = ytre_venstre) %>% 
+  mutate(across(where(~ inherits(.x, "numeric")),
+         ~ as.numeric(scale(.x))))
+
+regresjon_skalert$tid <- ekte_data$tid
+regresjon_skalert$kode <- ekte_data$kode
+regresjon_skalert$folketall <- ekte_data$folketall
+regresjon_skalert$ytre_venstre <- ekte_data$ytre_venstre*100
+regresjon_skalert$venstre <- ekte_data$venstre*100
+```
+
+```{r}
+# Uskalert regresjonsdata
+
+regresjon_uskalert <- 
+  ekte_data %>% 
+  rename(medianinntekt = inntekt_median, #Variabler kan ikke ha understrek
+         justertmedianinntekt = justert_inntekt_median,
+         gjennomsnittsinntekt = inntekt_gjennomsnitt,
+         justertgjennomsnittsinntekt = justert_inntekt_gjennomsnitt,
+         justertsysselsetting = justert_sysselsetting,
+         ytrevenstre = ytre_venstre) 
+
+
+regresjon_uskalert$tid <- ekte_data$tid
+regresjon_uskalert$kode <- ekte_data$kode
+regresjon_uskalert$folketall <- ekte_data$folketall
+```
+
+```{r}
+
+agenda <- read_excel("(temporal saksagenda).xlsx", 
+                              skip = 0)
+
+geografisk_retorikk <- read_excel("(geografisk retorikk).xlsx", 
+                              skip = 0)
+
+geografisk_fremgang <- read_excel("(geografisk fremgang).xlsx", 
+                              skip = 0)
+```
+
+
+## Rask analyse
+
+```{r}
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(gjerrig_data, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  select(group, lat, long, kode, kommune, gjerrigindeks, eiendomsskatt_2023) %>% 
+  mutate(kategori = 
+           case_when(eiendomsskatt_2023 >= 5 & 
+                       gjerrigindeks < 1 ~ "Lite økonomisk gjerrig,\nmed høy eiendomsskatt",
+                     eiendomsskatt_2023 < 5 & 
+                       gjerrigindeks < 1 ~ "Lite økonomisk gjerrig,\nmed lav eiendomsskatt",
+                     eiendomsskatt_2023 >= 5 & 
+                       gjerrigindeks > 1 ~ "Ganske økonomisk gjerrig,\nmed høy eiendomsskatt",
+                     eiendomsskatt_2023 < 5 & 
+                       gjerrigindeks > 1 ~ "Ganske økonomisk gjerrig,\nmed lav eiendomsskatt"))
+
+
+kart_farger <- c("Lite økonomisk gjerrig,\nmed høy eiendomsskatt" = "dodgerblue3",
+                 "Lite økonomisk gjerrig,\nmed lav eiendomsskatt" = "dodgerblue1",
+                 "Ganske økonomisk gjerrig,\nmed høy eiendomsskatt" = "firebrick3",
+                 "Ganske økonomisk gjerrig,\nmed lav eiendomsskatt" = "firebrick1")
+
+kart <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori,
+                   text = paste0("Kommune: ", kommune, 
+                                 "\nSkjevhet: ", retorikk,
+                                 "\nKategori: ", kategori)),
+               color = "black",
+               alpha = 1,
+               size = 0.1)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Politisk gjerrige kommuner og eiendomsskatt",
+       subtitle = "Politisk gjerrige kommuner har stor velstand, men også stor fattigdom.\nDette kan kommunene delvis kompensere for med å øke eiendomsskatten, hvis de vil...")+
+  theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 2, byrow = FALSE))
+
+  
+kart
+
+ggsave("figur_eiendomsskatt_geografi.png", width = 8, height = 10)
+
+```
+
+# Analyse
+
+## Sentralmaal
+
+```{r}
+# Gjennomsnittet av alle variabler i alle kommuner i alle aar
+
+s_gjennomsnitt <- 
+  as.data.frame(pivot_longer(ekte_data %>% 
+                               group_by(tid) %>% 
+                               summarise_at(vars(ytre_venstre:bondeskogbruker), mean), 
+                             cols = everything()))
+
+s_gjennomsnitt$tid <- 
+  c(rep(2005, 36),
+    rep(2007, 36),
+    rep(2009, 36),
+    rep(2011, 36),
+    rep(2013, 36),
+    rep(2015, 36),
+    rep(2017, 36),
+    rep(2019, 36),
+    rep(2021, 36))
+  
+s_gjennomsnitt <- s_gjennomsnitt %>% 
+  filter(name != "tid") %>% 
+  pivot_wider(names_from = "name",
+              values_from = "value")
+
+# Medianen av alle variabler i alle kommuner i alle aar
+
+s_median <- 
+  as.data.frame(pivot_longer(ekte_data %>% 
+                               group_by(tid) %>% 
+                               summarise_at(vars(ytre_venstre:bondeskogbruker), median), 
+                             cols = everything()))
+s_median$tid <- 
+  c(rep(2005, 36),
+    rep(2007, 36),
+    rep(2009, 36),
+    rep(2011, 36),
+    rep(2013, 36),
+    rep(2015, 36),
+    rep(2017, 36),
+    rep(2019, 36),
+    rep(2021, 36))
+    
+s_median <- s_median %>% 
+  filter(name != "tid") %>% 
+  pivot_wider(names_from = "name",
+              values_from = "value")
+                             
+```
+
+Ulikheten i kommune-Norge okte med 4.5% under Stoltenberg-regjeringene fra 2005 til 2013. 
+
+Ulikheten i kommune-Norge okte med 15.2% under Solberg-rejgeringene fra 2013 til 2021.
+
+Venstresidens gjennomsnittlig andel (hver kommune teller likt):
+
+2005: 0.54818014
+2007: 0.53974509
+2009: 0.52798623
+2011: 0.52267723
+2013: 0.47299740
+2015: 0.56836993
+2017: 0.47598838
+2019: 0.58212200
+2021: 0.56091338
+
+## Diagrammer
+
+```{r, fig.width=20, fig.height=20}
+analyse_data <- 
+  ekte_data %>% 
+  group_by(kommune) %>% 
+  summarise(sysselsetting = mean(sysselsetting),
+            arbeidsledighet = mean(arbeidsledighet),
+            folketall = mean(folketall)) %>% 
+  filter(kommune != "Oslo") %>% 
+  as.data.frame()
+
+ggplot(analyse_data,
+       aes(x = sysselsetting,
+           y = arbeidsledighet,
+           size = folketall,
+           label = kommune))+
+  scale_size("folketall",
+             range = c(0,30))+
+  geom_point(alpha=0.4)+
+  geom_smooth(method = "auto")+
+  ggpubr::stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+                   p.accuracy = 0.001, r.accuracy = 0.01,
+                   label.x = 0.3)+
+  ggrepel::geom_text_repel(min.segment.length = 0,
+                           size = 3)+
+  theme_bw()
+```
+
+
+```{r}
+ggplot(ekte_data, 
+       aes(x = ulikhet, group = factor(tid), fill = factor(tid))
+       )+
+  geom_density(adjust=1.5, alpha=.4)+
+  scale_x_continuous(limits = c(0.1, 0.4),
+                     breaks = seq(0, 0.4, by = 0.05))+
+  theme_bw()
+
+ggplot(ekte_data, 
+       aes(x = justert_inntekt_median, group = factor(tid), fill = factor(tid))
+       )+
+  geom_density(adjust=1.5, alpha=.4)+
+  scale_x_continuous(limits = c(240000, 580000),
+                     breaks = seq(200000, 600000, by = 100000))+
+  theme_bw()
+
+ggplot(ekte_data, 
+       aes(x = fattigdom, 
+           group = factor(tid),
+           fill = factor(tid)))+
+  geom_density(adjust = 1.5, 
+               alpha=.4)+
+  scale_x_continuous(limits = c(0, 0.17),
+                     breaks = seq(0, 0.18, by = 0.02))+
+  theme_bw()
+
+ggplot(ekte_data, 
+       aes(x = utdanning, group = factor(tid), fill = factor(tid))
+       )+
+  geom_density(adjust=1.5, alpha=.4)+
+  scale_x_continuous(limits = c(0, 0.55),
+                     breaks = seq(0, 0.55, by = 0.05))+
+  theme_bw()
+
+ggplot(ekte_data, 
+       aes(x = medianandel, group = factor(tid), fill = factor(tid))
+       )+
+  geom_density(adjust=1.5, alpha=.4)+
+  scale_x_continuous(limits = c(0.6, 1),
+                     breaks = seq(0, 1, by = 0.1))+
+  theme_bw()
+
+
+ggplot(ekte_data, 
+       aes(x = innvandring, group = factor(tid), fill = factor(tid))
+       )+
+  geom_density(adjust=1.5, alpha=.4)+
+  scale_x_continuous(limits = c(0, 0.2),
+                     breaks = seq(0, 0.2, by = 0.05))+
+  theme_bw()
+```
+
+## Korrelasjoner
+
+```{r}
+# Median of the absolute deviations from the data's median (MAD)
+
+analyse_data <- ekte_data %>% 
+  filter(tid == 2021)
+
+median(analyse_data$inntekt_median)-((mad(analyse_data$inntekt_median))*0.2)
+median(analyse_data$inntekt_median)
+median(analyse_data$inntekt_median)+((mad(analyse_data$inntekt_median))*0.2)
+
+median(analyse_data$venstresiden)-((mad(analyse_data$venstresiden))*0.2)
+median(analyse_data$venstresiden)
+median(analyse_data$venstresiden)+((mad(analyse_data$venstresiden))*0.2)
+
+```
+```{r}
+test <- ekte_data %>% 
+  group_by(kommune) %>% 
+  summarise(mean_ulikhet = mean(ulikhet),
+            mean_landbruk = mean(landbruk))
+
+
+sd(test$mean_landbruk)
+
+mean(test$mean_landbruk)
+
+sd(test$mean_landbruk)/var(test$mean_landbruk)
+```
+
+
+# Variabelen venstresiden
+
+## Ideologi
+
+```{r}
+temporal_ideologi <- read_excel("(temporal ideologi).xlsx", 
+                              skip = 0,
+                              na = "..")
+
+temporal_ideologi <- temporal_ideologi %>% 
+  pivot_longer(cols = c(2:10),
+               names_to = "parti",
+               values_to = "ideologi") %>% 
+  arrange(parti)
+
+plassering <- temporal_ideologi %>% 
+  group_by(parti) %>% 
+  summarise(plassering = mean(ideologi, na.rm = TRUE)) %>% 
+  arrange(parti) %>% 
+  slice(rep(1:n(), each = 5)) 
+
+temporal_ideologi$plassering <- plassering$plassering
+
+temporal_ideologi$gruppe <- factor(temporal_ideologi$plassering,
+                         levels = c("Rodt",
+                                    "Sosialistisk Venstreparti",
+                                    "Arbeiderpartiet", 
+                                    "Senterpartiet",
+                                    "Miljopartiet de Gronne",
+                                    "Kristelig Folkeparti",
+                                    "Venstre",
+                                    "Hoyre",
+                                    "Fremskrittspartiet"))
+```
+
+```{r}
+ideologi <- ggplot(temporal_ideologi,
+                   aes(x = tid,
+                       y = ideologi))+
+  geom_bar(aes(fill = ideologi < 0), 
+           stat = "identity") + 
+  scale_fill_manual(guide = FALSE, 
+                    breaks = c(TRUE, FALSE), 
+                    values = c("#a82e2e", "#324e75"))+
+  scale_x_reverse(
+    limits = c(2023, 2003), 
+    breaks = seq(2025, 2001, by = -4))+
+      scale_y_continuous(limits = c(-1.7, 1.7),
+                     breaks = seq(-2, 2, by = 0.5)) +
+  coord_flip()+
+  facet_wrap(~factor(parti, levels = c("Rodt",
+                                    "Sosialistisk Venstreparti",
+                                    "Arbeiderpartiet", 
+                                    "Senterpartiet",
+                                    "Miljopartiet de Gronne",
+                                    "Kristelig Folkeparti",
+                                    "Venstre",
+                                    "Hoyre",
+                                    "Fremskrittspartiet")))+
+  labs(title = "Norske partiers plassering\nlangs venstre-hoyre-aksen",
+       subtitle = "I henhold til Manifesto Project (2005, 2009, 2013, 2017) og Aftenposten (2021).",
+       x = element_blank(),
+       y = "\nIdeologisk plassering paa en skala fra\n-3 (venstresiden) til 3 (hoyresiden)",
+       )+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(),
+        legend.position = "top",
+        plot.title.position = "plot",
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 14),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+      strip.background = element_rect(fill="#fffff3"),
+      text=element_text(family="Georgia"))
+
+ideologi
+
+ggsave("figur_venstresidens_ideologi.png", width = 10, height = 8)
+```
+
+## Komposisjon
+
+```{r}
+temporal_komposisjon <- read_excel("(temporal komposisjon).xlsx", 
+                              skip = 0,
+                              na = "..")
+
+temporal_komposisjon <- temporal_komposisjon %>% 
+  pivot_longer(cols = c(3:11),
+               names_to = "tid",
+               values_to = "komposisjon") %>% 
+  mutate(tid = as.numeric(tid))
+```
+
+```{r}
+farger <- c("Rodt" = "#a82e2e",
+            "Sosialistisk Venstreparti" = "#c57474",
+            "Arbeiderpartiet" = "#e2b9b9",
+            "Venstre" = "#bbc4d1",
+            "Hoyre" = "#7689a3",
+            "Fremskrittspartiet" = "#324e75")
+
+temporal_komposisjon$parti <- 
+  factor(temporal_komposisjon$parti,
+         levels = c("Rodt", "Sosialistisk Venstreparti","Arbeiderpartiet","Venstre","Fremskrittspartiet","Hoyre"))
+
+
+komposisjon <- ggplot(temporal_komposisjon,
+       aes(x = tid,
+           y = komposisjon,
+           fill = parti,
+           color = parti)) + 
+  geom_area(aes(fill = parti), 
+            position = "stack",
+            alpha = 0.7, 
+            size = 0.2,
+            colour="black")+
+  scale_fill_manual(
+    breaks = c("Rodt",
+               "Sosialistisk Venstreparti",
+               "Arbeiderpartiet",
+               "Venstre",
+               "Fremskrittspartiet",
+               "Hoyre"),
+    values = farger,
+    labs(label = ""))+
+  scale_x_continuous(
+    limits = c(2004.8, 2021.2), 
+    breaks = seq(2005, 2021, by = 4))+
+  
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     breaks = seq(0, 1, by = 0.1))+
+  facet_wrap(~factor(blokk,
+                     levels = c("Venstresiden",
+                                "Hoyresiden")))+
+  labs(title = "Venstre- og hoyresidens sammensetning",
+       subtitle = "Samlede nasjonale stemmetall til partiene i stortings- og fylkesvalg i kommunene siden 2005.",
+       y = "Intern sammensetning",
+       x = element_blank(),
+       )+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(),
+        legend.position = "top",
+        plot.title.position = "plot",
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 14),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        strip.background = element_rect(fill="#fffff3"),
+        text=element_text(family="Georgia"))+
+    guides(fill = guide_legend(nrow = 2, ncol = 3, byrow = TRUE))
+
+komposisjon
+
+ggsave("figur_venstresidens_komposisjon.png", width = 10, height = 8)
+```
+
+# Regresjonsanalyse
+
+
+## Y ~ variabler (R² = 0.55)
+
+
+```{r}
+model_a <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               eldre+kristendom+innvandring+kvinner+sentralitet+factor(tid),
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+model_b <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet+factor(tid),
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+model_c <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet+factor(tid),
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+
+stargazer(model_a,model_b,
+          header = FALSE,
+          dep.var.labels.include = FALSE,
+          model.names = FALSE,
+          model.numbers = FALSE,
+          align=TRUE,
+          no.space=TRUE,
+          df = FALSE,
+          digits = 2,
+          digits.extra = 0,
+          column.separate = c(1,1,1),
+          decimal.mark = ",",
+          omit = c("landsdel","tid","eldre","kristendom","innvandring","kvinner","sentralitet"),
+          add.lines = list(c("Valgaar som dummyvariabel?", "Ja", "Ja"),
+                           c("Kulturelle kontrollvariabler?", "Ja", "Ja")),
+          column.labels = c("Sosial klassemodell",
+                            "Sosiookonomisk modell"),
+          covariate.labels = 
+            c("Landbruksarbeidere","Sosialarbeidere","Petroleumsarbeidere",
+              "Naeringsdrivende","Ingeniorer","Fagarbeidere","Servicearbeidere",
+              "Forretningsmenn", "Sosioprofesjonelle","Samfunnsarbeidere",
+              "Inntektsforskjeller","Pendling","Naeringssvakhet","Arbeidsledighet",
+              "Offentlig sektor","Sysselsetting"),
+          notes.label = "Signifikansnivaaer:",
+          type = "html",
+          out = "variabler_lsdv.html",
+          report = "vc*",
+          dep.var.caption  = "Effekten paa venstresidens prosentvise oppslutning, av ulike kategorier med variabler",
+          title = "Resultater fra regresjonsanalyse med LSDV-modeller og normaliserte variabler")
+
+```
+
+## Y ~ modeller (R² = 0.511)
+
+```{r}
+# Kommunevektet sosiodemografisk modell med faste effekter
+
+modelx <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet+factor(tid),
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+modelx_uskalert <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet+factor(tid),
+     data = regresjon_uskalert,
+     na.action = "na.exclude")
+
+model2 <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet+factor(tid),
+     weights = folketall,
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+model3 <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+
+               sentralitet+factor(tid)+factor(landsdel),
+     weights = folketall,
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+# Tabell
+
+stargazer(modelx,model2,model3,
+          header = FALSE,
+          dep.var.labels.include = FALSE,
+          model.names = FALSE,
+          model.numbers = FALSE,
+          align=TRUE,
+          no.space=TRUE,
+          df = FALSE,
+          digits = 2,
+          digits.extra = 0,
+          column.separate = c(1,1,1),
+          decimal.mark = ",",
+          omit = c("landsdel","tid","eldre","kristendom","innvandring","kvinner","sentralitet"),
+          add.lines = list(c("Kulturelle kontrollvariabler?", "Ja", "Ja", "Ja"),
+                           c("Valgaar som dummyvariabel?", "Ja", "Ja", "Ja"),
+                           c("Landsdel som dummyvariabel?","Nei","Nei","Ja"),
+                           c("Vektet etter folketall?", "Nei","Ja","Ja")),
+          column.labels = c("Vektet likt",
+                             "Vektet etter folketall",
+                             "Vektet etter folketall og landsdel"),
+          covariate.labels = 
+            c("Landbruksarbeidere","Sosialarbeidere","Petroleumsarbeidere",
+              "Naeringsdrivende","Ingeniorer","Fagarbeidere","Servicearbeidere",
+              "Forretningsmenn", "Sosioprofesjonelle","Samfunnsarbeidere",
+              "Inntektsforskjeller","Pendling","Naeringssvakhet","Arbeidsledighet",
+              "Offentlig sektor","Sysselsetting"),
+          notes.label = "Signifikansnivaaer:",
+          type = "html",
+          out = "modeller_lsdv.html",
+          report = "vc*",
+          dep.var.caption  = "Effekten paa venstresidens prosentvise oppslutning, med ulike vekter for kommunene",
+          title = "Resultater fra regresjonsanalyse av den sosiookonomiske LSDV-modellen")
+
+
+```
+
+```{r}
+# Fylker
+
+model_d <- 
+  lm(venstre ~ naeringsdrivende+sosialarbeider+servicearbeider+
+               forretningsmann+ingenior+fagarbeider+samfunnsarbeider+
+               sosioprofesjonell+bondeskogbruker+petroleum+
+               ulikhet+offentlig+sysselsetting+logutslipp+pendling+
+               eldre+kvinner+innvandring+petroleum+kristendom+factor(tid)+factor(fylke),
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+stargazer(model_d,
+          align=TRUE,
+          no.space=TRUE,
+          ci = FALSE,
+          single.row=TRUE,
+          column.labels = c("(3) + Geografi"),
+          dep.var.labels=c("Venstresidens oppslutning"),
+          omit = c("sosialarbeider",
+                   "naeringsdrivende",
+                   "servicearbeider",
+                   "forretningsmann",
+                   "ingenior",
+                   "underviser",
+                   "fagarbeider",
+                   "samfunnsarbeider",
+                   "sosioprofesjonell",
+                   "offentlig",
+                   "sysselsetting",
+                   "logutslipp",
+                   "eldre",
+                   "kvinner",
+                   "innvandring",
+                   "kristendom",
+                   "hregjering",
+                   "petroleum",
+                   "ulikhet",
+                   "pendling",
+                   "bondeskogbruker",
+                   "tid"),
+          type = "html",
+          report = "vc*",
+          out = "sosiodemografi_fylke.html",
+          title = "Resultater fra standardisert regresjonsanalyse")
+```
+
+
+```{r}
+# aar
+model_d <- 
+  lm(venstre ~ naeringsdrivende+sosialarbeider+servicearbeider+
+               forretningsmann+ingenior+fagarbeider+samfunnsarbeider+
+               sosioprofesjonell+bondeskogbruker+petroleum+
+               ulikhet+offentlig+sysselsetting+logutslipp+pendling+
+               eldre+kvinner+innvandring+petroleum+kristendom+factor(tid)+factor(fylke),
+     data = regresjon_skalert,
+     na.action = "na.exclude")
+
+stargazer(model_d,
+          align=TRUE,
+          no.space=TRUE,
+          ci = FALSE,
+          single.row=TRUE,
+          column.labels = c("(3) + Geografi"),
+          dep.var.labels=c("Venstresidens oppslutning"),
+          omit = c("sosialarbeider",
+                   "naeringsdrivende",
+                   "servicearbeider",
+                   "forretningsmann",
+                   "ingenior",
+                   "underviser",
+                   "fagarbeider",
+                   "samfunnsarbeider",
+                   "sosioprofesjonell",
+                   "offentlig",
+                   "sysselsetting",
+                   "logutslipp",
+                   "eldre",
+                   "kvinner",
+                   "innvandring",
+                   "kristendom",
+                   "hregjering",
+                   "petroleum",
+                   "ulikhet",
+                   "pendling",
+                   "bondeskogbruker",
+                   "fylke"),
+          type = "html",
+          report = "vc*",
+          out = "sosiodemografi_valgaar.html",
+          title = "Resultater fra standardisert regresjonsanalyse")
+```
+
+
+
+
+# Regresjonsdiagnostikk
+
+## Diagnostikk
+
+
+```{r}
+diagnostikk <- regresjon_skalert %>% 
+  mutate(modelfitted = fitted(modelx), 
+         modelresid = resid(modelx),
+         modelresid_abs = abs(modelresid),
+         row_names = row.names(regresjon_skalert)
+         )
+
+diagnostikk %>% 
+  group_by(tid) %>% 
+  summarise(polarisering = mean(modelresid_abs))
+```
+
+```{r}
+test <- diagnostikk %>% 
+  select(kommune,folketall,venstre,modelfitted,modelresid_abs)
+
+mean(test$modelresid_abs)
+
+median(test$modelresid_abs)
+```
+
+## Normalitet
+
+```{r}
+shapiro.test(ekte_data$venstre) #p-value = 0.00000001135
+```
+
+Men kan overkommes fordi observasjonsenehtene er over 3000!
+
+https://iovs.arvojournals.org/article.aspx?articleid=2128171
+
+## Endogenitet
+
+```{r,fig.height=12,fig.width=12}
+analyse_data <- diagnostikk %>% 
+  select(bondeskogbruker,sosialarbeider,naeringsdrivende,ingenior,
+               forretningsmann,fagarbeider,samfunnsarbeider,servicearbeider,petroleum,
+               sosioprofesjonell,ulikhet,pendling,sysselsetting,logutslipp,
+               offentlig,eldre,kristendom,innvandring,kvinner,modelresid_abs)  
+
+corr_simple <- function(data = analyse_data, sig = 0) {
+  df_cor <- analyse_data %>% 
+    mutate_if(is.character, as.factor)
+  df_cor <- df_cor %>%
+    mutate_if(is.factor, as.numeric)
+  corr <- cor(df_cor)
+  corr[lower.tri(corr,diag=TRUE)] <- NA 
+  corr[corr == 1] <- NA 
+  corr <- as.data.frame(as.table(corr))
+  corr <- na.omit(corr) 
+  corr <- corr[order(-abs(corr$Freq)),] 
+  corr <- subset(corr, abs(Freq) > sig) 
+  print(corr)
+  mtx_corr <- reshape2::acast(corr, Var1~Var2, value.var="Freq")
+  corrplot::corrplot(mtx_corr, is.corr=TRUE, tl.col="black", method="pie", na.label=" ")
+}
+
+corr_simple(analyse_data)
+```
+
+
+## Konstant varians (homoskedastisitet)
+
+```{r, fig.width=10, fig.height=7}
+analyse_data <- regresjon_skalert %>% 
+  select(ulikhet,kristendom,offentlig,eldre,innvandring,
+         kvinner,petroleum,landbruk,sysselsetting,pendling,hregjering,
+         sosialarbeider,servicearbeider,fagarbeider,sosioprofesjonell,
+         naeringsdrivende,samfunnsarbeider,ingenior,forretningsmann,logutslipp)  
+
+corr_simple <- function(data = analyse_data, sig = 0) {
+  df_cor <- analyse_data %>% 
+    mutate_if(is.character, as.factor)
+  df_cor <- df_cor %>%
+    mutate_if(is.factor, as.numeric)
+  corr <- cor(df_cor)
+  corr[lower.tri(corr,diag=TRUE)] <- NA 
+  corr[corr == 1] <- NA 
+  corr <- as.data.frame(as.table(corr))
+  corr <- na.omit(corr) 
+  corr <- corr[order(-abs(corr$Freq)),] 
+  corr <- subset(corr, abs(Freq) > sig) 
+  print(corr)
+  mtx_corr <- reshape2::acast(corr, Var1~Var2, value.var="Freq")
+  corrplot::corrplot(mtx_corr, is.corr=TRUE, tl.col="black", method="pie", na.label=" ")
+}
+
+corr_simple(analyse_data)
+
+ggplot(ekte_data %>% 
+         filter(tid == 2021), aes(pendling, sentralitet))+
+  geom_point()+
+  geom_smooth(method = "auto")+
+  ggpubr::stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+                   p.accuracy = 0.001, r.accuracy = 0.01,
+                   label.x = 0.7)+
+  theme_bw()
+```
+
+```{r}
+# Er gjennomsnittet til residualene lik 0?
+
+mean(resid(modelx))
+
+# ------- Ja
+```
+
+
+```{r, fig.width=8, fig.height=8}
+test <- diagnostikk %>% 
+  select(kommune,folketall,venstre,modelfitted,modelresid,modelresid_abs)
+
+ggplot(data = test,
+       aes(x = modelfitted,
+           y = venstre)) +
+  geom_point(aes(color = modelresid < 0),
+             stat = "identity",
+             alpha = 0.5)+
+  geom_smooth(method = "lm",
+              linetype = "dashed",
+              se = FALSE,
+              alpha = 0.5,
+              color = "black")+
+  geom_smooth(linetype = "dashed",
+              se = FALSE,
+              alpha = 0.5,
+              color = "blue")+
+  ggpubr::stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+                   p.accuracy = 0.001, r.accuracy = 0.001,
+                   label.x = 20)+
+  scale_x_continuous(limits = c(10, 90),
+                     breaks = seq(0, 100, by = 10))+
+  scale_y_continuous(limits = c(10, 90),
+                     breaks = seq(0, 100, by = 10))+
+  theme_bw()+
+  labs(x = "\nPredikert andel av stemmene for venstresiden\n",
+       y = "\nVenstresidens faktiske andel av stemmene\n",
+       title = "Fordeling av restledd og predikerte verdier i modellen\n")+
+  theme_bw()
+
+
+# -------> Sammenhengen mellom restledd og de predikerte verdiene bor ideelt sett fremstaa som en sky, noe som vil indikere mangel paa skjevhet i dataene. Dette er tilfelle. Trendlinjen er ogsaa i naerheten av 0.
+```
+
+
+```{r,fig.width=8,fig.height=8}
+# Er residualene normalfordelte?
+
+ggplot(diagnostikk, aes(x = venstre,
+                        y = modelresid)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon")+
+  labs(x = "\nVenstresidens oppslutning\n",
+       y = "\nResidualer\n",
+       title = "Fordeling av residualer i modellen\n")+
+  theme_bw()
+
+# -------> Fordelingen ser heldigvis ut til aa vaere normalfordelt
+```
+
+
+```{r}
+# Er residualene homoskedastiske?
+
+lmtest::bptest(model3)
+
+plot(model3, 3)
+
+# -------> Teststatistikken har en p-verdi paa under 0.05, og nullhypotesen om homoskedastisitet er forkastet og heteroskedastisitet antatt.
+```
+
+Det er et brudd paa regresjonsforutsetningene dersom variansen til restleddet avhenger av verdiene til forklaringsvariablene. Restleddet er da heteroskedastisk, ikke homoskedastisk, slik det burde ha vaert. Ved heteroskedastisitet varierer spredningen rundt regresjonslinjen med verdiene til X, noe som betyr at ogsaa prediksjonsevnen til modellen varierer med X. R 2 og justert R2 er upaavirket av heteroskedastisitet. Heteroskedastisitet paavirker derimot standardfeil, t-verdier, f-verdier og konfidensintervaller. Vi kan identifisere heteroskedastisitet grafisk. Kommandoen vi maa bruke da er rvfplot, yline (0). Denne maa brukes etter en regresjonskommando.
+
+```{r}
+# Innflytelsesrike observasjoner paa avveie - Cook's distansemaal
+
+N = sum (!is.na(cooks.distance(modelx)))   #Antall observasjoner
+k = length(coefficients(modelx)-1)   #Antall variabler subtrahert med én
+limit.cook = (4/(N-k-1))  #Grenseverdi
+```
+
+Plottet viser Cooks avstand, et estimat av paavirkningen som observasjoner har naar det gjennomfores en regresjonsanalyse med minste kvadraters metode. Vi ser at Froya, Modal, Kautekeino og Gamvik er innflytelsesrike observasjoner paa avveie ("outliers").
+
+Dette positive resultatet kan vaere en heldig ulykke, et produkt av gunstige forhold som var paa plass aaret dataene ble samlet inn. Det blir veldig interessant aa se om beta-koeffisienten og determinasjonskoeffisienten varierer mye med hvilket aar regresjonsanalysen gjennomfores i. Jeg vil derfor sjekke om monsteret holder seg over tid, ved aa se paa de ulike modellene over flere aar.
+
+
+## Treffsikkerhet - 5 farger
+
+```{r, fig.width=10, fig.height=10}
+diagnostikk <- regresjon_skalert %>% 
+  mutate(modelfitted = fitted(modelx), 
+         modelresid = resid(modelx),
+         modelresid_abs = abs(modelresid),
+         row_names = row.names(regresjon_skalert)) %>% 
+  group_by(kommune,kode) %>% 
+  summarise(skjevhet = mean(modelresid_abs),
+            skjevhet_retning = mean(modelresid),
+            folketall = mean(folketall),
+            venstre = mean(venstre),
+            predikert = mean(modelfitted),
+            fylke = fylke) %>% 
+  arrange(kommune)
+
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(diagnostikk, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  select(group, lat, long, kode, kommune, skjevhet) %>% 
+  mutate(skjevhet = abs(skjevhet),
+         kategori_skjevhet = 
+           case_when(skjevhet > 15 ~ "> 15%",
+                     skjevhet > 10 & skjevhet < 15 ~ "10% - 14.9%",
+                     skjevhet > 5 & skjevhet < 10 ~ "5% - 9.9%",
+                     skjevhet > 2.5 & skjevhet < 5 ~ "2.5% - 4.9%",
+                     skjevhet < 2.5 ~ "0% - 2.4%"))
+
+analyse_data$kategori_skjevhet <- 
+  factor(analyse_data$kategori_skjevhet,
+         levels = c("0% - 2.4%","2.5% - 4.9%","5% - 9.9%","10% - 14.9%","> 15%"))
+
+kart_farger <- c("0% - 2.4%" = "#324e75",
+                 "2.5% - 4.9%" = "#7689a3",
+                 "5% - 9.9%" = "#fffff3",
+                 "10% - 14.9%" = "#c57474",
+                 "> 15%" = "#a82e2e")
+
+kart_skjevhet <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_skjevhet,
+                   text = paste0("Kommune: ", kommune, 
+                                 "\nSkjevhet: ", skjevhet,
+                                 "\nKategori: ", kategori_skjevhet)),
+               color = "black",
+               alpha = 1,
+               size = 0.1)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Treffsikkerheten til den sosiookonomiske modellen",
+       subtitle = "Prosentdifferanse fra den sosiookonomiske modellens prediksjoner\ntil det faktiske styrkeforholdet mellom venstre- og hoyresiden.")+
+  theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 1, byrow = FALSE))
+  
+kart_skjevhet
+
+ggsave("figur2_skjevhet_fylkesmodell.png", width = 8, height = 10)
+
+# Interaktiv figur
+
+library(plotly)
+
+figur <- ggplotly(kart_skjevhet, tooltip = "text")
+
+m <- list(
+  l = 50,
+  r = 50,
+  b = 50,
+  t = 50,
+  pad = 4
+)
+
+figur <- figur %>% 
+  layout(autosize = F, width = 900, height = 900, margin = m)
+
+htmlwidgets::saveWidget(as_widget(figur), "kart_skjevhet_fylkesmodell.html")
+```
+
+# Visualisering av modellen
+
+## Effektplott
+
+```{r}
+effektplott_predikert <- ggeffects::ggpredict(modelx_uskalert)
+  
+predikert_ulikhet <- effektplott_predikert$ulikhet
+predikert_offentlig <- effektplott_predikert$offentlig
+predikert_eldre <- effektplott_predikert$eldre
+predikert_innvandring <- effektplott_predikert$innvandring
+predikert_kvinner <- effektplott_predikert$kvinner
+predikert_sysselsetting <- effektplott_predikert$sysselsetting
+predikert_arbeidsledighet <- effektplott_predikert$arbeidsledighet
+predikert_pendling <- effektplott_predikert$pendling
+predikert_kristendom <- effektplott_predikert$kristendom
+predikert_sentralitet <- effektplott_predikert$sentralitet
+predikert_logutslipp <- effektplott_predikert$logutslipp
+
+predikert_sosialarbeider <- effektplott_predikert$sosialarbeider
+predikert_servicearbeider <- effektplott_predikert$servicearbeider
+predikert_fagarbeider <- effektplott_predikert$fagarbeider
+predikert_ingenior <- effektplott_predikert$ingenior
+predikert_forretningsmann <- effektplott_predikert$forretningsmann
+predikert_sosioprofesjonell <- effektplott_predikert$sosioprofesjonell
+predikert_naeringsdrivende <- effektplott_predikert$naeringsdrivende
+predikert_bondeskogbruker <- effektplott_predikert$bondeskogbruker
+predikert_petroleum <- effektplott_predikert$petroleum
+predikert_samfunnsarbeider <- effektplott_predikert$samfunnsarbeider
+
+effektplott_alle <- 
+  data.frame(rbind(predikert_ulikhet,
+                   predikert_offentlig,
+                   predikert_eldre,
+                   predikert_innvandring,
+                   predikert_kvinner,
+                   predikert_petroleum,
+                   predikert_sysselsetting,
+                   predikert_pendling,
+                   predikert_forretningsmann,
+                   predikert_fagarbeider,
+                   predikert_sosialarbeider,
+                   predikert_arbeidsledighet,
+                   predikert_servicearbeider,
+                   predikert_samfunnsarbeider,
+                   predikert_ingenior,
+                   predikert_kristendom,
+                   predikert_sosioprofesjonell,
+                   predikert_naeringsdrivende,
+                   predikert_bondeskogbruker,
+                   predikert_logutslipp,
+                   predikert_sentralitet
+                   ))
+
+rm(predikert_ulikhet)
+rm(predikert_offentlig)
+rm(predikert_eldre)
+rm(predikert_innvandring)
+rm(predikert_kvinner)
+rm(predikert_sysselsetting)
+rm(predikert_pendling)
+rm(predikert_hregjering)
+rm(predikert_kristendom)
+rm(predikert_sosialarbeider)
+rm(predikert_servicearbeider)
+rm(predikert_fagarbeider)
+rm(predikert_ingenior)
+rm(predikert_forretningsmann)
+rm(predikert_sosioprofesjonell)
+rm(predikert_naeringsdrivende)
+rm(predikert_bondeskogbruker)
+rm(predikert_petroleum)
+rm(predikert_samfunnsarbeider)
+rm(predikert_logutslipp)
+rm(predikert_arbeidsledighet)
+rm(predikert_sentralitet)
+
+effektplott_alle <- effektplott_alle %>%
+  mutate(group = 
+           case_when(group == "eldre" ~ "Andel\nover 60 aar",
+                     group == "innvandring" ~ "Andel\ninnvandrere",
+                     group == "kvinner" ~ "Andel\nkvinner",
+                     group == "bondeskogbruker" ~ "Andel landbruks-\narbeidere",
+                     group == "pendling" ~ "Andel\npendlere",
+                     group == "petroleum" ~ "Andel petroleums-\narbeidere",
+                     group == "sysselsetting" ~ "Andel\nsysselsatte",
+                     group == "offentlig" ~ "Andel\noffentlig ansatte",
+                     group == "ulikhet" ~ "Inntektsforskjeller\n(Gini-koeffisient)",
+                     group == "kristendom" ~ "Kirketjenester\nper 100 innbygger",
+                     group == "sentralitet" ~ "Sentrale\nservicefunksjoner",
+                     group == "forretningsmann" ~ "Andel\nforretningsmenn",
+                     group == "fagarbeider" ~ "Andel\nfagarbeidere",
+                     group == "sosialarbeider" ~ "Andel sosial-\narbeidere",
+                     group == "sosioprofesjonell" ~ "Andel sosio-\nprofesjonelle",
+                     group == "servicearbeider" ~ "Andel\nservicearbeidere",
+                     group == "samfunnsarbeider" ~ "Andel\nsamfunnsarbeidere",
+                     group == "arbeidsledighet" ~ "Andel\narbeidsledige",
+                     group == "naeringsdrivende" ~ "Andel\nnaeringsdrivende",
+                     group == "ingenior" ~ "Andel\ningeniorer",
+                     group == "logutslipp" ~ "Naeringssvakhet\n(karbonintensitet)")) %>% 
+  filter(!(str_detect(group,
+              "Sentrale\nservicefunksjoner|Andel\nkvinner|Andel\nover 60 aar|Kirketjenester\nper 100 innbygger|Andel\ninnvandrere")))
+
+```
+
+
+```{r,fig.height=12, fig.width=12}
+ggplot(data = effektplott_alle,
+       aes(x = x,
+           y = predicted))+
+  geom_smooth(method = "lm",
+              linetype = "solid",
+              alpha = 0.5,
+              se = TRUE,
+              color = "black")+
+  geom_hline(yintercept = 0.5,
+             colour = gray(1/2),
+             lty = 2)+ 
+  geom_ribbon(aes(ymin=conf.low, ymax=conf.high), alpha = 0.2)+
+  scale_y_continuous(labels = percent_format(accuracy = 1))+
+  facet_wrap(~group, scales = "free", ncol = 4)+
+  labs(title = "Predikerte oppslutning til venstresiden ved ulike nivaaer\nav variablene i den sosiookonomiske modellen",
+       x = element_blank(),
+       y = "Predikert oppslutning til venstresiden\n") +
+  theme_bw()+
+  theme(legend.position = "right",   #Legend on top
+        strip.text = element_text(size = 18),
+        axis.title = element_text(size = 25),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 16),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 15),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(20,0,20,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 20,
+                                     margin=margin(10,0,10,0)),
+        plot.caption = element_text(hjust = 1),
+        strip.background = element_rect(fill="#fffff3"),
+        text=element_text(family="Georgia"))
+  
+ggsave("figur_effektplott_ny.png", height = 12, width = 12)
+```
+
+## Koeffisientplott
+
+```{r, fig.width=8, fig.height=10}
+f1 <- data.frame(Variable = rownames(summary(modelx)$coef),
+                          Coefficient = summary(modelx)$coef[, 1],
+                          SE = summary(modelx)$coef[, 2],
+                          modelName = "Kommuner\nveier likt")
+
+f2 <- data.frame(Variable = rownames(summary(model2)$coef),
+                          Coefficient = summary(model2)$coef[, 1],
+                          SE = summary(model2)$coef[, 2],
+                          modelName = "Kommuner vektet\netter folketall")
+
+f3 <- data.frame(Variable = rownames(summary(model3)$coef),
+                          Coefficient = summary(model3)$coef[, 1],
+                          SE = summary(model3)$coef[, 2],
+                          modelName = "Kommuner vektet\netter folketall\nog landsdel")
+
+# Combine these data.frames
+
+f_alle <- data.frame(rbind(f1, f2, f3))
+
+f_alle <- f_alle %>% 
+  filter(Variable != "(Intercept)") %>% 
+  mutate(Variable = 
+          case_when(Variable == "eldre" ~ "Eldre",
+          Variable == "innvandring" ~ "Innvandring",
+          Variable == "kvinner" ~ "Kvinner",
+          Variable == "bondeskogbruker" ~ "Landbruksarbeidere",
+          Variable == "pendling" ~ "Pendling",
+          Variable == "petroleum" ~ "Petroleumsarbeidere",
+          Variable == "sysselsetting" ~ "Sysselsetting",
+          Variable == "offentlig" ~ "Offentlig sektor",
+          Variable == "ulikhet" ~ "Inntektsforskjeller",
+          Variable == "kristendom" ~ "Kristendom",
+          Variable == "forretningsmann" ~ "Forretningsmenn",
+          Variable == "fagarbeider" ~ "Fagarbeidere",
+          Variable == "sosialarbeider" ~ "Sosialarbeidere",
+          Variable == "sosioprofesjonell" ~ "Sosioprofesjonelle",
+          Variable == "servicearbeider" ~ "Servicearbeidere",
+          Variable == "samfunnsarbeider" ~ "Samfunnsarbeidere",
+          Variable == "naeringsdrivende" ~ "Naeringsdrivende",
+          Variable == "ingenior" ~ "Ingeniorer",
+          Variable == "logutslipp" ~ "Naeringssvakhet",
+          Variable == "sentralitet" ~ "Sentralitet",
+          Variable == "arbeidsledighet" ~ "Arbeidsledige")) %>% 
+  filter(!is.na(Variable)) %>% 
+  arrange(Variable)
+
+f_order <- f_alle %>% 
+  group_by(Variable) %>% 
+  arrange(Variable) %>% 
+  summarise(Order = mean(Coefficient)) %>% 
+  slice(rep(1:n(), each = 3))
+
+f_absolutt_order <- f_order %>% 
+  mutate(abs_order = abs(Order))
+
+f_alle$Size <- f_order$Order
+
+# Specify the width of your confidence intervals
+
+interval <- -qnorm((1-0.95)/2)  # 95% multiplier
+
+# Plot
+
+p <- ggplot(f_alle, 
+       aes(color = modelName))+
+  geom_hline(yintercept = 0,
+             colour = gray(1/2),
+             lty = 2)+ 
+  geom_linerange(aes(x = reorder(Variable,Size),
+                     ymin = Coefficient - SE*interval,
+                     ymax = Coefficient + SE*interval),
+                 lwd = 1, 
+                 position = position_dodge(width = 0.8))+
+  geom_pointrange(aes(x = reorder(Variable,Size), 
+                      y = Coefficient, 
+                      ymin = Coefficient - SE*interval,
+                      ymax = Coefficient + SE*interval),
+                  lwd = 0.6, 
+                  size = 1,
+                  position = position_dodge(width = 0.8),
+                  shape = 16, 
+                  fill = "WHITE")+
+ scale_color_manual(values = c("#a82e2e", "#324e75", "black"),
+                     labs(label = "Tre modeller\nder kommuner\ner vektet ulikt"))+
+  scale_y_reverse(limits = c(6, -6),
+                  breaks = seq(-10, 10, by = 1),
+                  labels = scales::number_format(suffix = "%"))+
+  coord_flip(expand = FALSE)+
+  labs(title = "Predikert endring i venstresidens oppslutning\nfra variablene i den sosiookonomiske modellen",       
+       x = element_blank(),
+       y = "\nEndring i venstresidens oppslutning\n(standardiserte regresjonskoeffisienter)") +
+  theme_bw()+
+  theme(legend.position = "top",
+        plot.title.position = "plot",
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 14),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+  annotate("rect", ymin=0, ymax=6, xmin=0, xmax=22, fill="firebrick3", alpha=0.05) +
+  annotate("rect", ymin=-6, ymax=0, xmin=0, xmax=22, fill="dodgerblue3", alpha=0.05)
+
+p
+
+ggsave("figur_koeffisienter.png", height = 10, width = 8)
+
+```
+
+## Linjediagram
+
+```{r}
+k_modelx <- data.frame((summary(
+  lme4::lmList(
+   venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet|tid,
+     data = regresjon_skalert,
+     na.action = "na.exclude")))$coef)
+
+k_modelx$tid <- c(2005,2007,2009,2011,2013,2015,2017,2019,2021)
+
+
+k_modelx <- k_modelx %>% 
+  pivot_longer(!c(tid),
+               names_to = "variabel",
+               values_to = "Kommuner\nveier likt") %>% 
+  filter(!grepl("Pr...t|Intercept|Std..Error|t.value", variabel))
+
+k_model2 <- data.frame((summary(
+    lme4::lmList(
+      venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet|tid,
+     weights = folketall,
+     data = regresjon_skalert,
+     na.action = "na.exclude")))$coef)
+
+k_model2$tid <- c(2005,2007,2009,2011,2013,2015,2017,2019,2021)
+
+k_model2 <- k_model2 %>% 
+  pivot_longer(!c(tid),
+               names_to = "variabel",
+               values_to = "Kommuner vektet\netter folketall") %>% 
+  filter(!grepl("Pr...t|Intercept|Std..Error|t.value", variabel))
+
+k_model3 <- data.frame((summary(
+    lme4::lmList(
+      venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+
+               sentralitet+factor(landsdel)|tid,
+     weights = folketall,
+     data = regresjon_skalert,
+     na.action = "na.exclude")))$coef)
+
+k_model3$tid <- c(2005,2007,2009,2011,2013,2015,2017,2019,2021)
+
+
+k_model3 <- k_model3 %>% 
+  pivot_longer(!c(tid),
+               names_to = "variabel",
+               values_to = "Kommuner vektet\netter folketall\nog landsdel") %>% 
+  filter(!grepl("Pr...t|Intercept|Std..Error|t.value", variabel))
+```
+
+
+```{r,fig.width=8,fig.height=10}
+k_alle <- k_modelx %>% 
+  left_join(k_model2, by = c("tid","variabel")) %>% 
+  left_join(k_model3, by = c("tid","variabel")) %>% 
+  pivot_longer(cols = !c(tid,variabel),
+               names_to = "model",
+               values_to = "verdi") %>% 
+  transform(variabel = str_replace(variabel,"Estimate.",""))
+
+ggplot(k_alle, 
+       aes(x = tid, 
+           y = verdi, 
+           color = model))+
+  geom_line(size = 1) +
+  facet_wrap(~variabel,ncol = 4,scales = "free")+
+  scale_x_continuous(limits = c(2005, 2021),
+                     breaks = seq(2005, 2021, by = 4))+
+  labs(title = "Predikerte oppslutning til venstresiden\nved ulike nivaaer paa variablene i modellen",
+       x = element_blank(),
+       y = "\nPredikert oppslutning til venstresiden\n") +
+    theme_bw()+
+  theme(legend.position = "top",
+        plot.title.position = "plot",
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 14),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0))
+        )
+
+ggsave("figur_koeffisienter_tid.png", height = 12, width = 12)
+```
+
+```{r}
+test <- k_alle %>% 
+  group_by(variabel,tid) %>% 
+  summarise(mean_variabel = mean(verdi))
+  
+```
+```{r}
+test <- ekte_data %>% 
+  select(kommune,tid, ulikhet, venstre) %>% 
+  filter(tid == 2005)
+
+test <- test %>% 
+  mutate(ulikhet_kategori = case_when(
+    ulikhet > mean(ulikhet) ~ "Stor ulikhet",
+    ulikhet < mean(ulikhet) ~ "Lav ulikhet")) %>% 
+  group_by(ulikhet_kategori) %>% 
+  summarise(mean_venstre = mean(venstre))
+
+# lav ulikhet i 2005 = 0.5884524
+# stor ulikhet i 2005 = 0.488194
+```
+
+```{r}
+test <- ekte_data %>% 
+  select(kommune,tid, ulikhet, venstre) %>% 
+  filter(tid == 2005) 
+
+theme(strip.background =element_rect(fill="#fffff3"))
+
+test <- test %>% 
+  mutate(ulikhet_kategori = case_when(
+    ulikhet > mean(ulikhet) ~ "stor_ulikhet_2005",
+    ulikhet < mean(ulikhet) ~ "lav_ulikhet_2005")) %>% 
+  filter(ulikhet_kategori == "stor_ulikhet_2005") %>% 
+  group_by(ulikhet_kategori) %>%
+   summarise(mean = mean(venstre),
+             sd = sd(venstre))
+
+test_2021 <- ekte_data %>% 
+  select(kommune,tid, ulikhet, venstre) %>% 
+  filter(tid == 2021)
+
+test_2021 <- test_2021 %>% 
+  mutate(ulikhet_kategori = case_when(
+    ulikhet > mean(ulikhet) ~ "stor_ulikhet_2021",
+    ulikhet < mean(ulikhet) ~ "lav_ulikhet_2021"))%>% 
+  filter(ulikhet_kategori == "stor_ulikhet_2021")
+
+#samla_test <- test_2005 %>% 
+#  left_join(test_2005, by = c("kommune","tid")) 
+
+# lav ulikhet i 2005 = 0.5888136
+# stor ulikhet i 2005 = 0.5198381
+
+#t.test(venstre ~ ulikhet_kategori, data = test, var.equal = TRUE)
+```
+
+
+```{r}
+#res <- t.test(weight ~ group, data = my_data, var.equal = TRUE)
+#res
+```
+
+# Agenda og koeffisienter
+
+```{r, fig.width=12, fig.height=12}
+
+
+koeffisienter_modelx <- data.frame((summary(
+  lme4::lmList(
+    venstre ~ naeringsdrivende+sosialarbeider+servicearbeider+
+               forretningsmann+ingenior+fagarbeider+samfunnsarbeider+
+               sosioprofesjonell+bondeskogbruker+petroleum+arbeidsledighet+
+               ulikhet+offentlig+sysselsetting+logutslipp+pendling+
+               eldre+kvinner+innvandring+petroleum+kristendom|tid,
+     data = regresjon_skalert,
+     na.action = "na.exclude")))$coef)
+
+koeffisienter_modelx$tid <- c(2005,2007,2009,2011,2013,2015,2017,2019,2021)
+
+koeffisienter_modelx <- koeffisienter_modelx %>% 
+  pivot_longer(!c(tid),
+               names_to = "variabel",
+               values_to = "modelx") %>% 
+  filter(!grepl("Pr...t|Intercept|Std..Error|t.value", variabel)) %>% 
+  mutate_all(~gsub("Estimate.", "", .)) %>% 
+  pivot_wider(names_from = variabel,
+              values_from = modelx)
+
+koeffisienter_modelx[1:21] = lapply(koeffisienter_modelx[1:21],   #Preparing to use rowMeans
+                        FUN = function(x) {as.numeric(x)}
+                        )
+
+agenda_koeffisienter <- agenda %>% 
+  left_join(koeffisienter_modelx, by = "tid")
+
+mean_forklaringsvariabel <- ekte_data %>% 
+  group_by(kommune) %>% 
+  summarise(mean_bondeskogbruker = mean(bondeskogbruker),
+            mean_naeringsdrivende = mean(naeringsdrivende),
+            mean_forretningsmann = mean(forretningsmann),
+            mean_sosialarbeider = mean(sosialarbeider),
+            mean_servicearbeider = mean(servicearbeider),
+            mean_samfunnsarbeider = mean(samfunnsarbeider),
+            mean_fagarbeider = mean(fagarbeider),
+            mean_petroleum = mean(petroleum),
+            mean_sosioprofesjonell = mean(sosioprofesjonell),
+            mean_ulikhet = mean(ulikhet),
+            mean_pendling = mean(pendling),
+            mean_offentlig = mean(offentlig),
+            mean_logutslipp = mean(logutslipp),
+            mean_sysselsetting = mean(sysselsetting),
+            mean_arbeidsledighet= mean(arbeidsledighet),
+            mean_eldre = mean(eldre),
+            mean_kristendom = mean(kristendom),
+            mean_innvandring = mean(innvandring),
+            mean_kvinner = mean(kvinner),
+            mean_ingenior = mean(ingenior)) %>% 
+  slice(rep(1:n(), each = 9))
+
+mean_forklaringsvariabel <- ekte_data %>% 
+  left_join(mean_forklaringsvariabel, by = "kommune") %>% 
+  left_join(agenda, by = "tid") %>% 
+  unique()
+```
+
+```{r}
+x_model <- 
+  lm(venstre ~ sosialpolitikk+helsepolitikk+skattepolitikk+moralpolitikk+
+    industripolitikk+utenrikspolitikk+skolepolitikk+samferdselpolitikk+
+    arbeidslivpolitikk+miljopolitikk+justispolitikk+familiepolitikk,
+     data = mean_forklaringsvariabel,
+     na.action = "na.exclude")
+
+stargazer(x_model,
+          header = FALSE,
+          dep.var.labels.include = FALSE,
+          model.names = FALSE,
+          model.numbers = FALSE,
+          align=TRUE,
+          no.space=TRUE,
+          df = FALSE,
+          digits = ,
+          digits.extra = 0,
+          decimal.mark = ",",
+          notes.label = "Signifikansnivaaer:",
+          type = "html",
+          out = "ny_modell.html",
+          report = "vc*")
+
+```
+
+```{r}
+test <- 
+  mean_forklaringsvariabel %>% 
+  pivot_longer(cols = c(
+    sosialpolitikk,helsepolitikk,skattepolitikk,moralpolitikk,
+    industripolitikk,utenrikspolitikk,skolepolitikk,samferdselpolitikk,
+    arbeidslivpolitikk,miljopolitikk,justispolitikk,familiepolitikk,
+    innvandringpolitikk,eldrepolitikk,eldrepolitikk),
+               names_to = "politikk",
+               values_to = "verdi") %>% 
+  select(kommune,venstre,politikk, verdi) %>%
+  group_by(kommune,politikk) %>% 
+  summarize(p = cor.test(venstre,verdi)[["p.value"]],
+            r = cor(venstre,verdi))
+
+test <- test %>% 
+  group_by(politikk) %>% 
+  summarize(mean_r = mean(r),
+            mean_p = mean(p),
+            median_r = median(r),
+            median_p = median(p))
+```
+
+
+
+```{r}
+ggplot(mean_forklaringsvariabel %>% 
+         pivot_longer(cols = c(sosialpolitikk,helsepolitikk),
+               names_to = "politikk",
+               values_to = "verdi"),
+       aes(x = verdi,
+           y = venstre,
+           color = politikk)) +
+  geom_point(size = 3,
+             alpha = 0.4,
+             shape = 16)+
+  geom_smooth(method = "lm",
+              linetype = "dashed",
+              size = 1,
+              se = FALSE)+
+  scale_color_manual(values = c("#da4d1e", "#009b98"),
+                     labs(fill = ""))+
+  ggpmisc::stat_poly_eq(aes(label = paste(..rr.label..,..p.value.label.., sep = "~~~")), 
+                        parse = TRUE, size = 3)+
+  facet_wrap(~kommune,scales = "free")+
+  theme_bw()+
+  theme(legend.position = "top")
+```
+
+
+## Geografisk betinget agendaindeks
+
+```{r}
+# Hoy verdi = bra for venstresiden
+
+agendaindeks <- regresjon_skalert %>% 
+  mutate(sosial_indeks = 
+           (bondeskogbruker*3.6387951*0.689093369)+
+           (fagarbeider*-1.5130750*2.605001468)+
+           (forretningsmann*-0.9798132*0.773101607)+
+           (logutslipp*1.7838241*0.350609671)+
+           (naeringsdrivende*-1.8977391*0.82083569)+
+           (offentlig*1.1705319*2.694090935)+
+           (pendling*-1.9041422*1.849729459)+
+           (petroleum*-2.0418077*1.333274399)+
+           (servicearbeider*-1.0190344*0.010231772)+
+           (sosialarbeider*2.4019593*0.810799857)+
+           (sysselsetting*-1.1022154*0.90082244)+
+           (ulikhet*-3.1569182*1.492928722)+
+           (eldre*2.5233562*0.29978945),
+         helse_indeks = 
+           (bondeskogbruker*3.6387951*1.555009655)+
+           (fagarbeider*-1.5130750*2.369383105)+
+           (forretningsmann*-0.9798132*1.522978309)+
+           (logutslipp*1.7838241*2.056721346)+
+           (naeringsdrivende*-1.8977391*0.849480978)+
+           (offentlig*1.1705319*3.787791547)+
+           (pendling*-1.9041422*2.288258582)+
+           (petroleum*-2.0418077*1.329874795)+
+           (servicearbeider*-1.0190344*1.483608822)+
+           (sosialarbeider*2.4019593*2.228015201)+
+           (sysselsetting*-1.1022154*3.010343471)+
+           (ulikhet*-3.1569182*2.649918132)+
+           (eldre*2.5233562*2.98914119)) %>%
+  mutate(
+    kategori = case_when(
+      sosial_indeks > helse_indeks ~ "Helsepolitikk",
+      helse_indeks > sosial_indeks ~ "Sosialpolitikk"
+    ))
+
+```
+
+## Viktig
+
+```{r}
+test <- agendaindeks %>% 
+  filter(tid == c(2021))
+
+cor(test$sosial_indeks,test$venstre)
+```
+
+```{r,fig.width=8,fig.height=8}
+sospol <- geografisk_retorikk %>% 
+  filter(gruppe == "Sosialpolitikk") %>% 
+  select(kommune, gruppe, differanse)
+
+helspol <- geografisk_retorikk %>% 
+  filter(gruppe == "Helsepolitikk") %>% 
+  select(kommune, gruppe, differanse)
+
+analyse_data <- regresjon_skalert %>% 
+  left_join(sospol, by = "kommune") %>% 
+  left_join(helspol, by = "kommune") %>%
+  rename("sospol" = "differanse.x",
+         "helsepol" = "differanse.y") %>% 
+  select(-c(gruppe.x,gruppe.y,utslipp)) %>% 
+  select(kommune,venstre,sospol,helsepol,sentralitet:bondeskogbruker,logutslipp,ulikhet)
+
+cor(analyse_data$sospol,analyse_data$ulikhet)-cor(analyse_data$venstre,analyse_data$ulikhet)
+
+
+cor(analyse_data$sospol,analyse_data$ulikhet)-cor(analyse_data$venstre,analyse_data$ulikhet)
+cor(analyse_data$helsepol,analyse_data$ulikhet)
+
+
+cor(analyse_data$venstre,analyse_data$ulikhet)
+
+
+cor(analyse_data$fagarbeider,analyse_data$ulikhet)
+
+cor(analyse_data$helsepol,analyse_data$ulikhet)
+cor(analyse_data$venstre,analyse_data$ulikhet)
+
+
+cor(analyse_data$venstre,analyse_data$fagarbeider)
+
+ggplot(data = analyse_data,
+       aes(x = helsepol,
+           y = ulikhet))+
+  geom_point()+
+  geom_smooth(method = "lm")
+# plot correlation matrix
+
+h <- cor(as.matrix(analyse_data[,3]),as.matrix(analyse_data[,-c(1,2)])-cor(analyse_data$venstre))
+h
+h <- as.data.frame(h)
+
+writexl::write_xlsx(h,"h.xlsx")
+
+
+s <- cor(as.matrix(analyse_data[,25]),as.matrix(analyse_data[,-c(1,2)]))
+s
+s <- as.data.frame(s)
+
+writexl::write_xlsx(s,"s.xlsx")
+
+c <- modelx$coefficients
+
+c <- as.data.frame(c)
+
+writexl::write_xlsx(c,"c.xlsx")
+```
+
+
+```{r}
+
+median(agendaindeks$mean_sosial_indeks)+mad(agendaindeks$mean_sosial_indeks*0.5)
+
+median(agendaindeks$mean_helse_indeks)+mad(agendaindeks$mean_helse_indeks*0.5)
+
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(agendaindeks, by = "kode")
+
+
+```
+
+
+
+```{r,fig.width=15,fig.height=15}
+ggplot(agendaindeks,
+       aes(x = mean_helse_indeks,
+           y = mean_sosial_indeks,
+           label = kommune,
+           size = folketall,
+           color = as.factor(kategori))) +
+  geom_point(stat = "identity",
+             alpha = 0.5)+
+  geom_hline(yintercept = 0,
+             alpha = 0.8)+
+  geom_vline(xintercept = 0,
+             alpha = 0.8)+
+  scale_size("folketall",
+             range = c(0,12))+
+  scale_x_continuous(limits = c(-80, 60), breaks = seq(-100, 100, by = 20))+
+  scale_y_continuous(limits = c(-80, 60), breaks = seq(-100, 100, by = 20))+
+  geom_text_repel(size = 1.5,
+                  segment.color = 'transparent')+
+  theme_bw()
+```
+
+```{r}
+analyse_data <- regresjon_skalert %>% 
+  group_by(kommune) %>% 
+  summarise(bondeskogbruker = mean(bondeskogbruker),
+            naeringsdrivende = mean(naeringsdrivende),
+            forretningsmann = mean(forretningsmann),
+            sosialarbeider = mean(sosialarbeider),
+            servicearbeider = mean(servicearbeider),
+            samfunnsarbeider = mean(samfunnsarbeider),
+            fagarbeider = mean(fagarbeider),
+            petroleum = mean(petroleum),
+            sosioprofesjonell = mean(sosioprofesjonell),
+            ulikhet = mean(ulikhet),
+            pendling = mean(pendling),
+            offentlig = mean(offentlig),
+            logutslipp = mean(logutslipp),
+            sysselsetting = mean(sysselsetting),
+            arbeidsledighet= mean(arbeidsledighet),
+            eldre = mean(eldre),
+            kristendom = mean(kristendom),
+            innvandring = mean(innvandring),
+            kvinner = mean(kvinner),
+            ingenior = mean(ingenior),
+            tid = tid,
+            venstre = venstre) %>% 
+  slice(rep(1:n(), each = 9)) %>% 
+  left_join(agenda, by = "tid") %>% 
+  unique() %>% 
+  mutate(sosial_indeks = 
+           (bondeskogbruker*3.6387951*0.689093369)+
+           (fagarbeider*-1.5130750*2.605001468)+
+           (forretningsmann*-0.9798132*0.773101607)+
+           (logutslipp*1.7838241*0.350609671)+
+           (naeringsdrivende*-1.8977391*0.82083569)+
+           (offentlig*1.1705319*2.694090935)+
+           (pendling*-1.9041422*1.849729459)+
+           (petroleum*-2.0418077*1.333274399)+
+           (servicearbeider*-1.0190344*0.010231772)+
+           (sosialarbeider*2.4019593*0.810799857)+
+           (sysselsetting*-1.1022154*0.90082244)+
+           (ulikhet*-3.1569182*1.492928722)+
+           (eldre*2.5233562*0.29978945),
+         helse_indeks = 
+           (bondeskogbruker*3.6387951*1.555009655)+
+           (fagarbeider*-1.5130750*2.369383105)+
+           (forretningsmann*-0.9798132*1.522978309)+
+           (logutslipp*1.7838241*2.056721346)+
+           (naeringsdrivende*-1.8977391*0.849480978)+
+           (offentlig*1.1705319*3.787791547)+
+           (pendling*-1.9041422*2.288258582)+
+           (petroleum*-2.0418077*1.329874795)+
+           (servicearbeider*-1.0190344*1.483608822)+
+           (sosialarbeider*2.4019593*2.228015201)+
+           (sysselsetting*-1.1022154*3.010343471)+
+           (ulikhet*-3.1569182*2.649918132)+
+           (eldre*2.5233562*2.98914119)) %>% 
+  mutate(
+    kategori = case_when(
+      sosial_indeks > helse_indeks ~ "Sosialindeks storre",
+      helse_indeks > sosial_indeks ~ "Helseindeks storre"),
+    
+    kategori_sosial = case_when(
+      sosial_indeks > 0 ~ "Hoy sosialindeks",
+      sosial_indeks < 0 ~ "Lav sosialindeks"),
+    
+    kategori_helse = case_when(
+      helse_indeks > 0 ~ "Hoy helseindeks",
+      helse_indeks < 0 ~ "Lav helseindeks"),
+    ) %>% 
+  select(kommune, tid, venstre, sosial_indeks,helse_indeks,
+         kategori_sosial,kategori_helse,
+           sosialpolitikk,helsepolitikk) %>% 
+  pivot_longer(cols = c(sosialpolitikk,helsepolitikk),
+               names_to = "politikk",
+               values_to = "verdi")
+  
+
+plot <- ggplot(analyse_data,
+       aes(x = verdi,
+           y = venstre,
+           label = tid,
+           color = politikk)) +
+  geom_point(size = 3,
+             alpha = 0.4,
+             shape = 16)+
+  geom_smooth(method = "lm",
+              linetype = "dashed",
+              size = 1,
+              se = FALSE)+
+  scale_color_manual(values = c("#da4d1e", "#009b98"),
+                     labs(fill = ""))+
+  geom_text_repel(size = 1.5,
+                  segment.color = 'transparent')+
+  facet_wrap(~kommune,scales = "free")+
+  theme_bw()
+
+plot
+
+
+test <- ggplot_build(plot)$data[[2]]     # Extract information about plot
+
+test <- test %>% 
+  group_by(PANEL, colour) %>%
+  summarise_at(vars(c(x,y)),
+               list(min = min, max = max)) %>% 
+  mutate(diff = abs((y_min-y_max))*100,
+         gruppe = case_when(
+           colour == "#da4d1e" ~ "Helsepolitikk",
+           colour == "#009b98" ~ "Sosialpolitikk")
+         ) 
+
+writexl::write_xlsx(test,"test.xlsx")
+
+analyse_data <- analyse_data %>% 
+  select(kommune) %>% 
+  unique() %>% 
+  arrange(kommune) %>% 
+  slice(rep(1:n(), each = 2))
+
+
+```
+
+## Geografiens retorikk
+
+```{r}
+
+
+geografisk_fremgang <- geografisk_fremgang %>% 
+  mutate(variabel = case_when(variabel == "eldre" ~ "Eldre",
+          variabel == "innvandring" ~ "Innvandring",
+          variabel == "kvinner" ~ "Kvinner",
+          variabel == "bondeskogbruker" ~ "Bonder",
+          variabel == "pendling" ~ "Pendlere",
+          variabel == "petroleum" ~ "Petroleumsarbeidere",
+          variabel == "sysselsetting" ~ "Sysselsetting",
+          variabel == "offentlig" ~ "Offentlig sektor",
+          variabel == "ulikhet" ~ "Inntektsforskjeller",
+          variabel == "kristendom" ~ "Kristendom",
+          variabel == "forretningsmann" ~ "Forretningsmenn",
+          variabel == "fagarbeider" ~ "Fagarbeidere",
+          variabel == "sosialarbeider" ~ "Sosialarbeidere",
+          variabel == "sosioprofesjonell" ~ "Sosioprofesjonelle",
+          variabel == "servicearbeider" ~ "Servicearbeidere",
+          variabel == "samfunnsarbeider" ~ "Samfunnsarbeidere",
+          variabel == "naeringsdrivende" ~ "Naeringsdrivende",
+          variabel == "ingenior" ~ "Ingeniorer",
+          variabel == "logutslipp" ~ "Naeringssvakhet",
+          variabel == "sentralitet" ~ "Sentralitet",
+          variabel == "arbeidsledighet" ~ "Arbeidsledige"),
+         kategori = case_when(
+           sospol > 0 & helsepol > 0 ~ "Baade sosial- og helsepolitikk\ner bra for venstresiden",
+           sospol < 0 & helsepol > 0 ~ "Helsepolitikk er bra venstresiden,\nmen ikke sosialpolitikk",
+           sospol < 0 & sospol < 0 ~ "Hverken sosial- eller helsepolitikk\ner bra for venstresiden",
+           sospol > 0 & helsepol < 0 ~ "Sosialpolitikk er bra for venstresiden,\nmen ikke helsepolitikk")
+         )
+```
+
+```{r,fig.width=10,fig.height=8}
+ggplot(geografisk_fremgang,
+       aes(x = helsepol,
+           y = sospol,
+           label = variabel,
+           color = kategori,
+           size = styrke)) +
+  geom_point(stat = "identity",
+             alpha = 0.5)+
+  geom_vline(xintercept = 0,
+             colour = gray(1/2),
+             lty = 2)+ 
+  geom_hline(yintercept = 0,
+             colour = gray(1/2),
+             lty = 2)+ 
+  scale_size("Prosentvis okning\nfor ett standardavvik",
+             range = c(0,15))+
+  geom_text_repel(size = 3.5,
+                  segment.color = 'transparent')+
+  scale_color_manual(values = c("#a82e2e","#c57474","#7689a3","#324e75"),
+                     labs(label = "Tolkning"))+
+  scale_fill_manual(values = c("#a82e2e","#c57474","#7689a3","#324e75"),
+                     labs(label = "Tolkning"))+
+  scale_x_continuous(labels = percent_format(accuracy = 1),
+                     limits = c(-0.055, 0.045),
+                     breaks = seq(-100, 100, by = 0.01))+
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     limits = c(-0.045, 0.045),
+                     breaks = seq(-100, 100, by = 0.01))+
+  labs(title = "Effekten av sosiookonomiske faktorer varierer med saksagenda",
+       subtitle = "Styrkeforholdet mellom venstre- og hoyresiden i norske kommuner siden paavirkes av baade\nsosiookonomiske faktorer, og hvilke saker som er paa den nasjonale velgeragendaen.",
+       x = "Endringen av variablenes effekt paa venstresidens\noppslutning naar helsepolitikk stiger paa agendaen",
+       y = "Endringen av variablenes effekt paa venstresidens\noppslutning naar sosialpolitikk stiger paa agendaen",
+       x = element_blank(),
+       )+
+  theme_bw()+
+  theme(legend.position = "right",
+        plot.title.position = "plot",
+        aspect.ratio = 1,
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        legend.text = element_text(size = 10),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+    guides(color = guide_legend(override.aes = aes(label = "", 
+                                                   alpha = 1,
+                                                   size=10)))
+
+ggsave("figur_sosiookonomisk_geografi.png", height = 8, width = 10)
+
+```
+
+
+```{r, fig.width=10, fig.height=10}
+retorikk <- geografisk_retorikk %>%
+  filter(gruppe == "Sosialpolitikk") %>% 
+  arrange(kommune)
+
+kode <- ekte_data %>% 
+  filter(tid == 2021) %>% 
+  arrange(kommune)
+
+retorikk$kode <- kode$kode
+
+BAMMtools::getJenksBreaks(retorikk$differanse, k = 6)
+
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(retorikk, by = "kode")
+
+
+analyse_data <- 
+  kart_data %>% 
+  select(group, lat, long, kode, kommune, differanse) %>% 
+  mutate(kategori_differanse = 
+           case_when(differanse > 12.8 ~ "> 12.8%",
+                     differanse > 6.9 & differanse < 12.8 ~ "6.9% - 12.8%",
+                     differanse > 2.4 & differanse < 6.9 ~ "2.4% - 6.9%",
+                     differanse < 2.4 ~ "< 2.4%"))
+
+analyse_data$kategori_differanse <- 
+  factor(analyse_data$kategori_differanse,
+         levels = c("< 2.4%", "2.4% - 6.9%","6.9% - 12.8%","> 12.8%"))
+
+kart_farger <- c("< 2.4%" = "#f0dcdc",
+                 "2.4% - 6.9%" = "#e2b9b9",
+                 "6.9% - 12.8%" = "#c57474",
+                 "> 12.8%" = "#a82e2e")
+kart <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_differanse,
+                   text = paste0("Kommune: ", kommune, 
+                                 "\nSkjevhet: ", retorikk,
+                                 "\nKategori: ", kategori_differanse)),
+               color = "black",
+               alpha = 1,
+               size = 0.1)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "okning i venstresidens oppslutning\nnaar sosialpolitikk er paa agendaen",
+       subtitle = "Data er kategorisert etter naturlige inndelinger iht. Jenks-optimaliseringsmetode")+
+  theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 1, byrow = FALSE))
+
+  
+kart
+
+ggsave("figur_sosialpolitikk_geografi.png", width = 8, height = 10)
+
+
+```
+
+
+
+```{r, fig.width=10, fig.height=10}
+retorikk <- geografisk_retorikk %>%
+  filter(gruppe == "Helsepolitikk") %>% 
+  arrange(kommune)
+
+kode <- ekte_data %>% 
+  filter(tid == 2021) %>% 
+  arrange(kommune)
+
+retorikk$kode <- kode$kode
+
+BAMMtools::getJenksBreaks(retorikk$differanse, k = 6)
+
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(retorikk, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  select(group, lat, long, kode, kommune, differanse) %>% 
+  mutate(kategori_differanse = 
+           case_when(differanse < -13.4 ~ "> 13.4%",
+                     differanse < -8 & differanse > -13.4 ~ "8% - 13.4%",
+                     differanse < -3.5 & differanse > -8 ~ "3.5% - 8%",
+                     differanse > -3.5 ~ "< 3.5%"))
+
+analyse_data$kategori_differanse <- 
+  factor(analyse_data$kategori_differanse,
+         levels = c("< 3.5%", "3.5% - 8%", "8% - 13.4%","> 13.4%"))
+
+kart_farger <- c("< 3.5%" = "#dde1e8",
+                 "3.5% - 8%" = "#bbc4d1",
+                 "8% - 13.4%" = "#7689a3",
+                 "> 13.4%" = "#324e75")
+
+
+
+kart <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_differanse,
+                   text = paste0("Kommune: ", kommune, 
+                                 "\nSkjevhet: ", retorikk,
+                                 "\nKategori: ", kategori_differanse)),
+               color = "black",
+               alpha = 1,
+               size = 0.1)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "okning i hoyresidens oppslutning\nnaar helsepolitikk er paa agendaen",
+       subtitle = "Data er kategorisert etter naturlige inndelinger iht. Jenks-optimaliseringsmetode")+
+  theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+        
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 1, byrow = FALSE))
+  
+kart
+
+ggsave("figur_helsepolitikk_geografi.png", width = 8, height = 10)
+
+
+```
+
+```{r}
+# Interaktiv figur
+
+library(plotly)
+
+figur <- ggplotly(kart, tooltip = "text")
+
+m <- list(
+  l = 50,
+  r = 50,
+  b = 50,
+  t = 50,
+  pad = 4)
+
+figur <- figur %>% 
+  layout(autosize = F, width = 900, height = 900, margin = m)
+
+htmlwidgets::saveWidget(as_widget(figur), "kart_sosialpolitikk_geografi.html")
+```
+
+## Helse og sosialpolitikk
+
+```{r}
+analyse_data <- ekte_data %>% 
+  left_join(agenda, by = "tid")
+
+test1 <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+               ingenior+fagarbeider+servicearbeider+forretningsmann+
+               sosioprofesjonell+samfunnsarbeider+
+               ulikhet+pendling+logutslipp+arbeidsledighet+
+               offentlig+sysselsetting+
+               eldre+kristendom+innvandring+kvinner+sentralitet+
+       bondeskogbruker*sosialpolitikk*sosialpolitikk+sosialarbeider*sosialpolitikk+
+       petroleum*sosialpolitikk+naeringsdrivende*sosialpolitikk+
+       ingenior*sosialpolitikk+fagarbeider*sosialpolitikk+
+       servicearbeider*sosialpolitikk+forretningsmann*sosialpolitikk+
+       sosioprofesjonell*sosialpolitikk+samfunnsarbeider*sosialpolitikk+
+       ulikhet*sosialpolitikk+pendling*sosialpolitikk+logutslipp*sosialpolitikk+
+       arbeidsledighet*sosialpolitikk+
+       offentlig*sosialpolitikk+sysselsetting*sosialpolitikk+
+       eldre*sosialpolitikk+kristendom*sosialpolitikk+
+       innvandring*sosialpolitikk+kvinner*sosialpolitikk+
+       sentralitet*sosialpolitikk,
+     data = analyse_data,
+     na.action = "na.exclude")
+
+test2 <- 
+  lm(venstre ~ bondeskogbruker+sosialarbeider+petroleum+naeringsdrivende+
+       ingenior+fagarbeider+servicearbeider+forretningsmann+
+       sosioprofesjonell+samfunnsarbeider+
+       ulikhet+pendling+logutslipp+arbeidsledighet+
+       offentlig+sysselsetting+
+       eldre+kristendom+innvandring+kvinner+sentralitet+
+       bondeskogbruker*helsepolitikk*helsepolitikk+sosialarbeider*helsepolitikk+
+       petroleum*helsepolitikk+naeringsdrivende*helsepolitikk+
+       ingenior*helsepolitikk+fagarbeider*helsepolitikk+
+       servicearbeider*helsepolitikk+forretningsmann*helsepolitikk+
+       sosioprofesjonell*helsepolitikk+samfunnsarbeider*helsepolitikk+
+       ulikhet*helsepolitikk+pendling*helsepolitikk+logutslipp*helsepolitikk+
+       arbeidsledighet*helsepolitikk+
+       offentlig*helsepolitikk+sysselsetting*helsepolitikk+
+       eldre*helsepolitikk+kristendom*helsepolitikk+
+       innvandring*helsepolitikk+kvinner*helsepolitikk+
+       sentralitet*helsepolitikk,
+     data = analyse_data,
+     na.action = "na.exclude")
+
+stargazer(test1,test2,
+          header = FALSE,
+          dep.var.labels.include = FALSE,
+          model.names = FALSE,
+          model.numbers = FALSE,
+          align=TRUE,
+          no.space=TRUE,
+          df = FALSE,
+          digits = 3,
+          digits.extra = 0,
+          column.separate = c(1,1,1),
+          decimal.mark = ",",
+          notes.label = "Signifikansnivaaer:",
+          type = "html",
+          out = "interkasjon_modeller.html",
+          report = "vc*",
+          dep.var.caption  = "Effekten paa venstresidens prosentvise oppslutning, av ulike kategorier med variabler",
+          title = "Resultater fra regresjonsanalyse med LSDV-modeller og normaliserte variabler")
+
+
+interact_plot(test1, pred = ulikhet, modx = sosialpolitikk, plot.points = TRUE, alpha = 0.5)
+interact_plot(test1, pred = eldre, modx = sosialpolitikk, plot.points = TRUE, alpha = 0.5)
+
+
+```
+
+```{r,fig.width=6,fig.height=4}
+plot <- interact_plot(test1, pred = sysselsetting, modx = sosialpolitikk, plot.points = TRUE, alpha = 0.001)+
+  theme_bw()
+
+plot
+```
+
+
+
+```{r}
+analyse_data %>% 
+  group_by(politikk) %>% 
+  summarise(sd_plus = mean(agendastorrelse)+sd(agendastorrelse)*0.5,
+            sd_minus = mean(agendastorrelse)-sd(agendastorrelse)*0.5)
+```
+
+
+```{r,fig.height=12, fig.width=12}
+analyse_data <- regresjon_skalert %>% 
+  left_join(agenda, by = "tid") %>%
+  select(kommune,tid,venstre,sysselsetting:bondeskogbruker,logutslipp,
+         sosialpolitikk,helsepolitikk,arbeidsledighet,ulikhet) %>% 
+  select(-justert_sysselsetting) %>% 
+  pivot_longer(cols = c(sysselsetting:bondeskogbruker,logutslipp,
+                        arbeidsledighet,ulikhet),
+               names_to = "forklaringsvariabel",
+               values_to = "variabelstorrelse") %>%
+  mutate(variabelstorrelse = case_when(
+    variabelstorrelse >= 0.5 ~ "Stor\nverdi",
+    variabelstorrelse < 0.5 ~ "Lav\nverdi")) %>%
+  pivot_longer(cols = c(helsepolitikk,sosialpolitikk),
+               names_to = "politikk",
+               values_to = "agendastorrelse") %>% 
+  mutate(ny_politikk = 
+           case_when(politikk == "helsepolitikk" & 
+                       agendastorrelse > 0.17360737 ~ "Hoy helsepolitikk",
+                     politikk == "helsepolitikk" &
+                       agendastorrelse < 0.13602226 ~ "Lav helsepolitikk",
+                     
+                     politikk == "sosialpolitikk" & 
+                       agendastorrelse > 0.09814256 ~ "Sosialpolitikk er\nhoyt paa agendaen",
+                     politikk == "sosialpolitikk" & 
+                       agendastorrelse < 0.05630188 ~ "Sosialpolitikk er\nlavt paa agendaen"))
+
+
+plot <- ggplot(data = analyse_data,
+       aes(x = variabelstorrelse, 
+           y = venstre,
+           group = ny_politikk,
+           colour = ny_politikk)) +
+  stat_summary(fun.y = mean, geom = "point") +
+  stat_summary(fun.y = mean, geom = "line") +
+  scale_color_manual(values = c("dodgerblue3","dodgerblue1","firebrick3","firebrick1"),
+                     labs(fill = ""))+
+  facet_wrap(~forklaringsvariabel, scales = "free", ncol = 4)+
+  labs(title = "Predikerte oppslutning til venstresiden ved ulike nivaaer\nav variablene i den sosiookonomiske modellen",
+       x = element_blank(),
+       y = "Predikert oppslutning til venstresiden\n") +
+  theme_bw()+
+  theme(legend.position = "right",   #Legend on top
+        strip.text = element_text(size = 18),
+        axis.title = element_text(size = 25),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 16),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 15),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(20,0,20,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 20,
+                                     margin=margin(10,0,10,0)),
+        plot.caption = element_text(hjust = 1),
+        strip.background = element_rect(fill="#fffff3"),
+        text=element_text(family="Georgia"))
+  
+ggsave("figur_ny_interaksjonseffekt.png", height = 12, width = 12)
+```
+
+```{r}
+test <- ggplot_build(plot)$data[[2]]     # Extract information about plot
+
+test <- test %>% 
+  group_by(PANEL, colour) %>%
+  summarise_at(vars(c(x,y)),
+               list(min = min, max = max)) %>% 
+  mutate(diff = abs((y_min-y_max))*100,
+         gruppe = case_when(
+           colour == "dodgerblue3" ~ "Hoy helsepolitikk",
+           colour == "dodgerblue1" ~ "Lav helsepolitikk",
+           colour == "firebrick3" ~ "Hoy sosialpolitikk",
+           colour == "firebrick1" ~ "Lav sosialpolitikk")
+         ) 
+
+writexl::write_xlsx(test,"ny_test.xlsx")
+
+```
+
+# Arbeiderpartiets
+
+```{r,fig.width=10,fig.height=10}
+analyse_data <- regresjon_skalert %>% 
+  left_join(geografisk_retorikk, by = c("kommune")) %>% 
+  select(kommune, fylke, folketall, kode, tid, venstre, gruppe,differanse,
+         bondeskogbruker,servicearbeider,ulikhet,fagarbeider,forretningsmann,
+         petroleum,eldre,sysselsetting,offentlig,naeringsdrivende) %>% 
+  pivot_wider(names_from = "gruppe",
+              values_from = "differanse") %>% 
+  mutate(samlet_effekt = abs(Helsepolitikk)+abs(Sosialpolitikk),
+         effekt_sosialpolitikk = Sosialpolitikk,
+         nye_velgere = 
+           (bondeskogbruker*18.82)+
+           (servicearbeider*21.59)+
+           (ulikhet*12.81)-
+           (petroleum*14.08)-
+           (eldre*18.16))
+
+analyse_data[is.na(analyse_data)] <- 0
+
+ test <- analyse_data %>% 
+  filter(tid >= 2013) %>% 
+  group_by(kommune) %>% 
+  summarise(effekt_sosialpolitikk = mean(effekt_sosialpolitikk, na.rm = TRUE),
+            oppslutning = mean(venstre),
+            nye_velgere = mean(nye_velgere),
+            folketall = mean(folketall),
+            kode = mean(kode)) %>% 
+  mutate(oppslutning_kategorisk = 
+           case_when(oppslutning < 30 ~ "0 - 29%",
+                     oppslutning > 30 & oppslutning < 40 ~ "30 - 39%",
+                     oppslutning > 40 & oppslutning < 50 ~ "40 - 49%",
+                     oppslutning > 50 & oppslutning < 60 ~ "50 - 59%",
+                     oppslutning > 60 & oppslutning < 70 ~ "60 - 69%",
+                     oppslutning > 70 ~ "70+ %")) %>% 
+   mutate(indeks = scale(nye_velgere)+scale(effekt_sosialpolitikk)) %>% 
+   mutate(indeks_kategorisk = 
+           case_when(indeks < -0.76 ~ "Ikke egnet sted å vinne velgere med sosialpolitikk",
+                     indeks > -0.76 & indeks < 0.63 ~ "Litt egnet sted å vinne velgere med sosialpolitikk",
+                     indeks > 0.63 & indeks < 2 ~ "Egnet sted å vinne velgere med sosialpolitikk",
+                     indeks > 2 ~ "Veldig egnet sted å vinne velgere med sosialpolitikk"))
+ 
+ 
+```
+
+```{r}
+
+ p <- ggplot(test,
+        aes(x = nye_velgere,
+            y = effekt_sosialpolitikk,
+            color = oppslutning_kategorisk,
+            label = kommune,
+            size = folketall))+
+  geom_point(alpha = 0.5)+
+  scale_size_continuous(range = c(2, 20),
+                        labs(fill = "Folketall")) + 
+  scale_x_continuous(limits = c(20,84),
+                     breaks = seq(20, 80, by = 5))+
+  scale_y_continuous(limits = c(0,16),
+                     breaks = seq(0, 16, by = 2))+
+  scale_color_manual(values = c("#1d4e89","#7295bf", "#c2c29c", "#ead98b", "#db9793","#954151" ),
+                     labs(fill = "Venstresidens gjennomsnittlige\noppslutning ved hvert valg\nsiden 2005"))+
+  geom_text_repel(size = 2,
+                   color = "black")+
+  labs(title = "Kommuner der velgerne er mottagelige for sosialpolitikk\nog der sosialpolitikk historisk sett har vært positiv for oppslutningen",
+       x = "\nProsentvis netto positiv holdning blant velgere til sosialpolitikk*",
+       y = "\nProsentvis økning i venstresidens oppslutning\nnår sosialpolitikk er på agendaen\n") +
+  theme_bw()+
+  theme(legend.position = "right",
+        strip.text = element_text(size = 12),
+        axis.title = element_text(size = 16),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        legend.text = element_text(size = 12),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 20,
+                                  margin=margin(0,0,10,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 12,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+   guides(color = guide_legend(override.aes = list(size = 6)))
+
+
+ 
+ p
+ 
+ ggsave("nye_velgere.png", bg = "transparent", height = 7, width = 10)
+
+```
+
+```{r}
+test %>% 
+  filter(folketall > 10000) %>% 
+  arrange(-indeks)
+```
+```{r, fig.width=10, fig.height=10, echo = FALSE, message = FALSE}
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(test, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  select(group, lat, long, kode, kommune, indeks, indeks_kategorisk)
+
+analyse_data$indeks_kategorisk <- 
+  factor(analyse_data$indeks_kategorisk,
+         levels = c("Ikke egnet sted å vinne velgere med sosialpolitikk",
+                    "Litt egnet sted å vinne velgere med sosialpolitikk",
+                    "Egnet sted å vinne velgere med sosialpolitikk",
+                    "Veldig egnet sted å vinne velgere med sosialpolitikk"))
+
+kart_farger <- c("Ikke egnet sted å vinne velgere med sosialpolitikk" = "#f0dcdc",
+                 "Litt egnet sted å vinne velgere med sosialpolitikk" = "#e2b9b9",
+                 "Egnet sted å vinne velgere med sosialpolitikk"  = "#c57474",
+                 "Veldig egnet sted å vinne velgere med sosialpolitikk" = "#a82e2e")
+
+
+kart <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = indeks_kategorisk,
+                   text = paste0("Kommune: ", kommune, 
+                                 "\nIndeks: ", indeks,
+                                 "\nIndekskategori: ", indeks_kategorisk)),
+               color = "black",
+               alpha = 1,
+               size = 0.1)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Kommuner der Ap kan vinne flere \nvelgere ved å fremme sosialpolitikk")+
+  theme_bw()+
+  theme(legend.position = "bottom",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm'),
+        legend.spacing = unit(1,"cm"),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 4, ncol = 1, byrow = TRUE))
+  
+kart
+
+ggsave("valgkamp.png", width = 8, height = 10)
+
+# Interaktiv figur
+
+library(plotly)
+
+figur <- ggplotly(kart, tooltip = "text")
+
+m <- list(
+  l = 50,
+  r = 50,
+  b = 50,
+  t = 50,
+  pad = 4
+)
+
+figur <- figur %>% 
+  layout(autosize = F, width = 900, height = 900, margin = m)
+
+htmlwidgets::saveWidget(as_widget(figur), "kart_valgkap.html")
+```
+
+
+# Korrelasjoner
+ 
+```{r}
+
+kart_farger <- c("Kommuner der sosialpolitikk\nstyrker venstresiden mye" = "firebrick3",
+                 "Kommuner der sosialpolitikk\nikke er utslagsgivende" = "gray70",
+                 "Kommuner der sosialpolitikk\nsvekker venstresiden mye" = "dodgerblue3")
+
+kart <- 
+  ggplot()+
+  geom_polygon(data = kart_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_sosial_indeks),
+               color = "black",
+               alpha = 0.8,
+               size = 0.1) +
+  scale_fill_manual(values = kart_farger,
+                     na.value = "white",
+                    labs(label = ""))+
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9))+
+  labs(title = "Tittel",
+       subtitle = "Undertittel\nundertittel")+
+  theme_bw()+
+  theme(legend.position = "top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.key.height = unit(1, "cm"),
+        legend.key.width = unit(0.5, "cm"),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,10,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)))+
+  guides(color = guide_legend(override.aes = list(alpha = 1)),
+         fill = guide_legend(nrow = 1, byrow = TRUE))
+
+kart
+
+ggsave("kart_politikk_sosial.png", bg = "transparent", height = 10, width = 10)
+
+
+kart_farger <- c("Kommuner der helsepolitikk\nstyrker venstresiden mye" = "firebrick3",
+                 "Kommuner der helsepolitikk\nikke er utslagsgivende" = "gray70",
+                 "Kommuner der helsepolitikk\nsvekker venstresiden mye" = "dodgerblue3")
+
+kart <- 
+  ggplot()+
+  geom_polygon(data = kart_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_helse_indeks),
+               color = "black",
+               alpha = 0.8,
+               size = 0.1) +
+  scale_fill_manual(values = kart_farger,
+                     na.value = "white",
+                    labs(label = ""))+
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9))+
+  labs(title = "Tittel",
+       subtitle = "Undertittel\nundertittel")+
+  theme_bw()+
+  theme(legend.position = "top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.key.height = unit(1, "cm"),
+        legend.key.width = unit(0.5, "cm"),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)))+
+  guides(color = guide_legend(override.aes = list(alpha = 1)),
+         fill = guide_legend(nrow = 1, byrow = TRUE))
+
+kart
+
+ggsave("kart_politikk_helse.png", bg = "transparent", height = 10, width = 10)
+
+kart_farger <- c("Kommuner der samferdselspolitikk\nstyrker venstresiden" = "firebrick3",
+                 "Kommuner der samferdselspolitikk\nikke er utslagsgivende" = "gray70",
+                 "Kommuner der samferdselspolitikk\nsvekker venstresiden" = "dodgerblue3")
+
+kart <- 
+  ggplot()+
+  geom_polygon(data = kart_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_samferdsel_indeks),
+               color = "black",
+               alpha = 0.8,
+               size = 0.1) +
+  scale_fill_manual(values = kart_farger,
+                     na.value = "white",
+                    labs(label = ""))+
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9))+
+  theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 8),
+        legend.key.height = unit(0.5, "cm"),
+        legend.key.width = unit(1, "cm"),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0))
+        )
+
+kart
+
+ggsave("kart_politikk_samferdsel.png", bg = "transparent", height = 10, width = 8)
+```
+
+
+## Regresjonkorrelasjon
+
+```{r, fig.width=20, fig.height=20,warning=FALSE}
+PerformanceAnalytics::chart.Correlation(
+  agenda_koeffisienter %>% 
+    select(ulikhet, #Forklaringsvariabel
+           moralpolitikk:industripolitikk), #Saksagendaer
+  histogram = TRUE,
+  method = "pearson")
+
+#-------------------------------------
+
+# ***: 0 - 0.001
+# **: 0.001 - 0.01
+# *: 0.01 - 0.05
+# •: 0.05 - 0.10 (option + 8 is a dot on a Mac)
+
+#-------------------------------------
+
+# 2 eller 3 stjerner: signifant paa 1% nivaa
+# 1 stjerne: signifikant paa 5% nivaa
+# 1 prikk: signifkant paa 10% nivaa
+```
+
+## R2-korrelasjon
+
+```{r, fig.width=10, fig.height=7,message = FALSE,warning = FALSE}
+analyse_data <- mean_forklaringsvariabel %>% 
+  mutate(
+    kategori_ulikhet = 
+      ifelse(mean_ulikhet < (mean(mean_ulikhet)-
+                               (sd(mean_ulikhet)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_ulikhet > (mean(mean_ulikhet)+
+                                      (sd(mean_ulikhet)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_bondeskogbruker = 
+      ifelse(mean_bondeskogbruker < (mean(mean_bondeskogbruker)-
+                                       (sd(mean_bondeskogbruker)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_bondeskogbruker > (mean(mean_bondeskogbruker)+
+                                              (sd(mean_bondeskogbruker)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_naeringsdrivende = 
+      ifelse(mean_naeringsdrivende < (mean(mean_naeringsdrivende)-
+                                        (sd(mean_naeringsdrivende)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_naeringsdrivende > (mean(mean_naeringsdrivende)+
+                                               (sd(mean_naeringsdrivende)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_forretningsmann = 
+      ifelse(mean_forretningsmann < (mean(mean_forretningsmann)-
+                                       (sd(mean_forretningsmann)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_forretningsmann > (mean(mean_forretningsmann)+
+                                              (sd(mean_forretningsmann)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_ingenior = 
+      ifelse(mean_ingenior < (mean(mean_ingenior)-
+                                (sd(mean_ingenior)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_ingenior > (mean(mean_ingenior)+
+                                       (sd(mean_ingenior)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_sosialarbeider = 
+      ifelse(mean_sosialarbeider < (mean(mean_sosialarbeider)-
+                                      (sd(mean_sosialarbeider)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_sosialarbeider > (mean(mean_sosialarbeider)+
+                                             (sd(mean_sosialarbeider)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_servicearbeider = 
+      ifelse(mean_servicearbeider < (mean(mean_servicearbeider)-
+                                       (sd(mean_servicearbeider)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_servicearbeider > (mean(mean_servicearbeider)+
+                                              (sd(mean_servicearbeider)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_samfunnsarbeider = 
+      ifelse(mean_samfunnsarbeider < (mean(mean_samfunnsarbeider)-
+                                        (sd(mean_samfunnsarbeider)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_samfunnsarbeider > (mean(mean_samfunnsarbeider)+
+                                               (sd(mean_samfunnsarbeider)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_fagarbeider = 
+      ifelse(mean_fagarbeider < (mean(mean_fagarbeider)-
+                                   (sd(mean_fagarbeider)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_fagarbeider > (mean(mean_fagarbeider)+
+                                          (sd(mean_fagarbeider)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_petroleum = 
+      ifelse(mean_petroleum < (mean(mean_petroleum)-
+                                 (sd(mean_petroleum)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_petroleum > (mean(mean_petroleum)+
+                                        (sd(mean_petroleum)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_sosioprofesjonell = 
+      ifelse(mean_sosioprofesjonell < (mean(mean_sosioprofesjonell)-
+                                         (sd(mean_sosioprofesjonell)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_sosioprofesjonell > (mean(mean_sosioprofesjonell)+
+                                                (sd(mean_sosioprofesjonell)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_pendling = 
+      ifelse(mean_pendling < (mean(mean_pendling)-
+                                (sd(mean_pendling)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_pendling > (mean(mean_pendling)+
+                                       (sd(mean_pendling)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_offentlig = 
+      ifelse(mean_offentlig < (mean(mean_offentlig)-
+                                 (sd(mean_offentlig)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_offentlig > (mean(mean_offentlig)+
+                                        (sd(mean_offentlig)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_logutslipp = 
+      ifelse(mean_logutslipp < (mean(mean_logutslipp)-
+                                  (sd(mean_logutslipp)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_logutslipp > (mean(mean_logutslipp)+
+                                         (sd(mean_logutslipp)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_sysselsetting = 
+      ifelse(mean_sysselsetting < (mean(mean_sysselsetting)-
+                                     (sd(mean_sysselsetting)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_sysselsetting > (mean(mean_sysselsetting)+
+                                            (sd(mean_sysselsetting)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_arbeidsledighet = 
+      ifelse(mean_arbeidsledighet < (mean(mean_arbeidsledighet)-
+                                       (sd(mean_arbeidsledighet)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_arbeidsledighet > (mean(mean_arbeidsledighet)+
+                                              (sd(mean_arbeidsledighet)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_eldre = 
+      ifelse(mean_eldre < (mean(mean_eldre)-
+                             (sd(mean_eldre)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_eldre > (mean(mean_eldre)+
+                                    (sd(mean_eldre)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_kristendom = 
+      ifelse(mean_kristendom < (mean(mean_kristendom)-
+                                  (sd(mean_kristendom)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_kristendom > (mean(mean_kristendom)+
+                                         (sd(mean_kristendom)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_innvandring = 
+      ifelse(mean_innvandring < (mean(mean_innvandring)-
+                                   (sd(mean_innvandring)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_innvandring > (mean(mean_innvandring)+
+                                          (sd(mean_innvandring)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+    
+    kategori_kvinner = 
+      ifelse(mean_kvinner < (mean(mean_kvinner)-
+                               (sd(mean_kvinner)*0.5)), 
+             "Kommuner med\nlav verdi",
+             ifelse(mean_kvinner > (mean(mean_kvinner)+
+                                      (sd(mean_kvinner)*0.5)), 
+                    "Kommuner med\nhoy verdi",
+                    "Kommuner med hverken\nlav eller hoy verdi")),
+  )
+
+analyse_data2 <- analyse_data %>% 
+  select(kommune, kode, tid, venstre, mean_bondeskogbruker:kategori_kvinner) %>% 
+  pivot_longer(cols = !c(kommune,kode, tid, venstre, mean_bondeskogbruker:industripolitikk),
+               names_to = "forklaringsvariabel",
+               values_to = "verdi") %>% 
+  group_by(forklaringsvariabel,tid) %>%
+  summarise(venstre = mean(venstre),
+            skolepolitikk  = mean(skolepolitikk),
+            sosialpolitikk = mean(sosialpolitikk),
+            distriktpolitikk = mean(distriktpolitikk),
+            innvandringpolitikk = mean(innvandringpolitikk),
+            arbeidslivpolitikk = mean(arbeidslivpolitikk),
+            justispolitikk = mean(justispolitikk),
+            moralpolitikk = mean(moralpolitikk),
+            familiepolitikk = mean(familiepolitikk),
+            eldrepolitikk = mean(eldrepolitikk),
+            helsepolitikk = mean(helsepolitikk),
+            miljopolitikk = mean(miljopolitikk),
+            samferdselpolitikk = mean(samferdselpolitikk),
+            skattepolitikk = mean(skattepolitikk),
+            utenrikspolitikk = mean(utenrikspolitikk),
+            industripolitikk = mean(industripolitikk),
+            verdi = mean(verdi)) %>% 
+  pivot_longer(cols = !c(forklaringsvariabel,tid,venstre),
+               names_to = c("politikk"),
+               values_to = "saksagenda") %>% 
+  filter(grepl("helsepolitikk|innvandringpolitikk|samferdselpolitikk|sosialpolitikk",
+               politikk))
+
+plot <- ggplot(analyse_data2, 
+               aes(x = saksagenda,
+                   y = verdi)) +
+  geom_point(size = 3,
+             alpha = 0.4,
+             shape = 16)+
+  geom_smooth(method = "lm",
+              linetype = "dashed",
+              size = 1,
+              se = FALSE)+
+  scale_color_manual(values = c("gray70", "#da4d1e", "#009b98"),
+                     labs(fill = ""))+
+  ggpmisc::stat_poly_eq(aes(label = paste(..rr.label..,..p.value.label.., sep = "~~~")), 
+                        parse = TRUE, size = 3)+
+  facet_grid(forklaringsvariabel~politikk,
+             scales = "free")+
+  theme_bw()+
+  theme(legend.position = "top")
+
+plot
+
+ggsave("figur_agendakorrelasjoner.png", bg = "transparent", height = 30, width = 10)
+```
+
+
+```{r}
+test <- ggplot_build(plot)$data[[2]]     # Extract information about plot
+
+test <- test %>% 
+  group_by(PANEL, colour) %>%
+  summarise_at(vars(c(x,y)),
+               list(min = min, max = max)) %>% 
+  mutate(diff = abs((y_min-y_max))*100,
+         gruppe = case_when(
+           colour == "#da4d1e" ~ "Kommuner med\nhoy verdi",
+           colour == "gray70" ~ "Kommuner hverken\nlav eller hoy verdi",
+           colour == "#009b98" ~ "Kommuner med\nlav verdi")
+         ) 
+
+writexl::write_xlsx(test,"test.xlsx")
+
+```
+
+## Plot
+
+```{r}
+plot <- ggplot(analyse_data2 %>% 
+                 filter(politikk == "sosialpolitikk",
+                        forklaringsvariabel == "kategori_offentlig"), 
+         aes(x = verdi,
+             y = venstre,
+             label = tid,
+             color = kommunegruppe)) +
+  geom_point()+
+  geom_smooth(method = "lm")+
+  scale_color_manual(values = c("gray70", "#da4d1e","#009b98"),
+                     labs(fill = ""))
+
+plot
+
+test <- ggplot_build(plot)$data[[2]]     # Extract information about plot
+
+test <- test %>% 
+  group_by(colour) %>%
+  summarise_at(vars(c(x,y)),
+               list(min = min, max = max)) %>% 
+  mutate(diff = (y_min-y_max)*100,
+         gruppe = case_when(
+           colour == "#da4d1e" ~ "Kommuner med\nliten offentlig sektor" ,
+           colour == "gray70" ~ "Kommuner med hverken liten\neller stor offentlig sektor",
+           colour == "#009b98" ~ "Kommuner med\nstor offentlig sektor")
+         )
+
+plot <- ggplot(analyse_data2 %>% 
+                 filter(politikk == "helsepolitikk",
+                        forklaringsvariabel == "kategori_offentlig"), 
+         aes(x = verdi,
+             y = venstre,
+             label = tid,
+             color = kommunegruppe)) +
+  geom_point(size = 2,
+             alpha = 0.4)+
+  geom_smooth(method = "lm",
+              linetype = "dashed",
+              size = 1,
+              se = FALSE)+
+  geom_text_repel(size = 1.5,
+                  segment.color = 'transparent')+
+  scale_x_continuous(labels = percent_format(accuracy = 1),
+                     breaks = seq(0, 1, by = 0.05))+
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     breaks = seq(0, 1, by = 0.05))+
+  scale_color_manual(values = c("gray70","#da4d1e", "#009b98"),
+                     labs(fill = ""))+
+  labs(x = "Andel velgere som nevner\nhelse som viktig sak",
+       y = "Venstresidens gjennomsnittlige\noppslutning i tre kommunekategorier")+
+  theme_bw()+
+  theme(legend.position = "top",
+        aspect.ratio = 0.8,
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size = 5),
+        legend.key.height = unit(0.05, 'cm'),
+        legend.key.width = unit(0.05, 'cm'))+
+  annotate(color = "#009b98",label = "- 8.8%",
+           "text",
+           x = test[[1,4]]-0.03, 
+           y = mean(c(test[[1,3]],test[[1,5]]))-0.02, size = 7)+
+  annotate(colour = "#009b98","segment",  # Horisonta
+           linewidth = 1, linetype = "dotted", 
+           x = test[[1,2]], xend = test[[1,4]], 
+           y = test[[1,3]], yend = test[[1,3]],
+           colour = "#009b98")+
+  annotate(colour = "#009b98","segment", # Vertikal
+           linewidth = 1, linetype = "dotted", 
+           x = test[[1,2]], xend = test[[1,2]], #endre andre koordinatene  
+           y = test[[1,3]], yend = test[[1,5]],
+           colour = "#009b98")+
+  annotate(color = "#da4d1e",label = "- 5.0%",
+          "text",
+           x = test[[2,4]]-0.03, 
+           y = mean(c(test[[2,3]],test[[2,5]]))-0.02, size = 7)+
+  annotate(colour = "#da4d1e","segment", # Horisontal
+           linewidth = 1, linetype = "dotted", 
+           x = test[[2,2]], xend = test[[2,4]], 
+           y = test[[2,3]], yend = test[[2,3]],
+           colour = "#da4d1e")+
+  annotate(colour = "#da4d1e","segment", # Vertikal
+           linewidth = 1, linetype = "dotted", 
+           x = test[[2,2]], xend = test[[2,2]], #endre andre koordinatene 
+           y = test[[2,3]], yend = test[[2,5]],
+           colour = "#da4d1e")
+
+plot
+```
+
+## Kart
+
+```{r}
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(analyse_data, by = "kode")
+
+kart_farger <- c("Kommuner med\nliten offentlig sektor" = "#da4d1e",
+                 "Kommuner med hverken liten\neller stor offentlig sektor" = "gray70",
+                 "Kommuner med\nstor offentlig sektor" = "#009b98")
+
+                       
+kart <- 
+  ggplot()+
+  geom_polygon(data = kart_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_offentlig),
+               color = "black",
+               alpha = 0.8,
+               size = 0.1) +
+  scale_fill_manual(values = kart_farger,
+                     na.value = "white",
+                    labs(label = ""))+
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9))+
+  theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 8),
+        legend.key.height = unit(0.5, "cm"),
+        legend.key.width = unit(1, "cm"),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0))
+        )
+
+kart
+
+ggsave("kart_arbeidsledighet.png", bg = "transparent", height = 10, width = 8)
+```
+
+```{r}
+analyse_data %>% 
+  select(folketall,kategori_kombinasjon1) %>% 
+  arrange(-folketall,kategori)
+```
+
+
+## Samlet
+
+```{r, fig.height=3.54,fig.width=7.48}
+plot_fantastisk <- 
+  ggpubr::ggarrange(kart,
+                    plot,
+                    ncol = 2,
+                    common.legend = TRUE,
+                    legend = "top") +
+  labs(title = "Naar helse er paa agendaen synker venstresidens oppslutning,\nog reduksjonen er storst i kommuner med stor offentlig sektor")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5, size = 14,
+                                  margin=margin(5,0,5,0)),
+        panel.border = element_blank()
+        )
+
+plot_fantastisk
+
+ggsave("offentlig_helsepolitikk.png", bg = "transparent", height = 3.52, width = 7.48)
+```
+
+# Gjerrigindeks
+
+## Eiendomsskatt
+
+```{r}
+eiendomsskatt <- read_excel("12843_20230220-151618 (eiendomsskatt).xlsx", 
+                            skip = 3,
+                            na = "..")
+
+ordforer <- read_excel("13099_20230523-180832 (ordforer).xlsx",
+                       skip = 4,
+                       na = ".")
+
+
+
+eiendomsskatt <- eiendomsskatt[-c(357:407),]
+
+ordforer <- ordforer[-c(357:408),-c(2,12:22)]
+
+
+colnames(eiendomsskatt) <- c("kommunevariabel","eiendomsskatt_2023")
+
+colnames(ordforer) <- c("kommunevariabel","Ap","Frp","Hoyre","KrF","Mdg","Rodt","Sp","SV","Venstre")
+
+
+eiendomsskatt[is.na(eiendomsskatt)] <- 0
+
+eiendomsskatt <- eiendomsskatt %>% 
+  mutate(kommune = str_sub(kommunevariabel, start = 6),
+         kode = str_sub(kommunevariabel, start = 0, end = 4),
+         kode = as.numeric(kode),
+         eiendomsskatt_2023 = eiendomsskatt_2023) %>%
+  relocate(eiendomsskatt_2023, .after = `kode`) %>%
+  select(-c(kommunevariabel, kommune))
+
+
+ordforer[is.na(ordforer)] <- 0
+
+ordforer <- ordforer %>% 
+  mutate(kommune = str_sub(kommunevariabel, start = 6),
+         kode = str_sub(kommunevariabel, start = 0, end = 4),
+         kode = as.numeric(kode)) %>%
+  mutate(
+    styringsparti = case_when(
+      Sp == 1 ~ "Senterpartiet",
+      Ap == 1 ~ "Venstresiden",
+      SV == 1 ~ "Venstresiden",
+      Venstre == 1 ~ "Hoyresiden",
+      Hoyre == 1 ~ "Hoyresiden",
+      Frp == 1 ~ "Hoyresiden")) %>%
+  select(-kommunevariabel,kommune)
+```
+
+## Soylediagram
+
+Gjerrigindeks = fattigdomsandel(gjennomsnittsinntekt - medianinntekt*)
+
+*Ettersom jeg ikke har tallene for "gjennomsnittsinntekten til fattige" i kommunene, maa jeg ta til takke med 60% av medianinntekten, som da blir inntekten til den rikeste av de fattige.
+
+
+```{r}
+ekte_data$gjerrigindeks <-
+  ekte_data$fattigdom*(ekte_data$inntekt_gjennomsnitt-(ekte_data$inntekt_median*0.6))
+
+ekte_data$gjerrigindeks <- ekte_data$gjerrigindeks/22797.09
+
+gjerrig_data <- ekte_data %>% 
+  filter(tid == 2021) %>% 
+  select(kommune, kode, folketall, tid,
+         gjerrigindeks, fattigdom, inntekt_median, inntekt_gjennomsnitt) %>%
+  left_join(eiendomsskatt, by = c("kode")) %>% 
+  left_join(ordforer, by = c("kode")) %>%
+  mutate(kommune = kommune.x,
+         gjerrig_levels = cut(gjerrigindeks,
+               breaks = c(-Inf, 0.9, 1.1, Inf),
+               labels = c("Politisk\ngeneros\nkommune",
+                          "Hverken\ngeneros\neller gjerrig",
+                          "Politisk\ngjerrig\nkommune"))) %>% 
+  select(-c(kommune.y,kommune.x))
+
+
+farger <- c("#324e75", "gray70", "#a82e2e")
+
+gjerrig_barplot <- gjerrig_data %>% 
+  group_by(gjerrig_levels) %>% 
+  summarise(skatt_mean = mean(eiendomsskatt_2023)/1000,
+            inntekt_mean = mean(inntekt_gjennomsnitt),
+            fattigdom_mean = mean(fattigdom))
+
+plot_inntekt <-  ggplot(data = gjerrig_barplot,
+       aes(x = gjerrig_levels,
+           y = inntekt_mean,
+           fill = gjerrig_levels)) + 
+  geom_bar(width = 0.8,
+           alpha = 0.9,
+           stat = "identity",
+           position = "dodge2")+
+  scale_y_continuous(oob = rescale_none)+
+  scale_fill_manual(values = farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  labs(x = "",
+       y = "Gjennomsnittsinntekt per innbygger\n")+
+  theme(axis.title.x = element_text(size = 35),
+        axis.title.y = element_text(size = 35),
+        axis.text = element_text(size = 15))+
+  theme_bw()
+
+plot_fattigdom <- ggplot(data = gjerrig_barplot,
+       aes(x = gjerrig_levels,
+           y = fattigdom_mean,
+           fill = gjerrig_levels)) + 
+  geom_bar(width = 0.8,
+           alpha = 0.9,
+           stat = "identity",
+           position = "dodge2")+
+  scale_fill_manual(values = farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     oob = rescale_none)+
+  labs(x = "",
+       y = "Gjennomsnittlig andel som lever i fattigdom\n")+
+  theme(axis.title.x = element_text(size = 35),
+        axis.title.y = element_text(size = 35),
+        axis.text = element_text(size = 15))+
+  theme_bw()
+
+plot_eiendomsskatt <- ggplot(data = gjerrig_barplot,
+       aes(x = gjerrig_levels,
+           y = skatt_mean,
+           fill = gjerrig_levels)) + 
+  geom_bar(width = 0.8,
+           alpha = 0.9,
+           stat = "identity",
+           position = "dodge2")+
+  scale_y_continuous(labels = percent_format(accuracy = 0.1),
+                     oob = rescale_none)+
+  scale_fill_manual(values = farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  labs(x = "",
+       y = "Gjennomsnittlig generell eiendomsskatt\n")+
+  theme(axis.title.x = element_text(size = 35),
+        axis.title.y = element_text(size = 35),
+        axis.text = element_text(size = 15))+
+  theme_bw()
+
+plot_fattigdom
+plot_eiendomsskatt
+plot_inntekt
+```
+
+## Kart
+
+```{r}
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(ekte_data, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  filter(tid == 2021) %>%
+  select(group, lat, long, kode, kommune, folketall,
+         gjerrigindeks) %>% 
+  mutate(kategori_gjerrigindeks = 
+           case_when(gjerrigindeks < 0.9 ~ "Generos\nkommune",
+                     gjerrigindeks < 1.1 & gjerrigindeks > 0.9 ~ "Hverken generos\neller gjerrig",
+                     gjerrigindeks > 1.1 ~ "Gjerrig\nkommune"))
+
+
+kart_farger <- c("Generos\nkommune" = "#324e75",
+                 "Hverken generos\neller gjerrig" = "gray70",
+                 "Gjerrig\nkommune" = "#a82e2e")
+
+kommune_sentroide <- 
+  summarize(group_by(analyse_data, kode),
+            x = mean(range(long)),
+            y = mean(range(lat)),
+            folketall = folketall,
+            kategori_gjerrigindeks = kategori_gjerrigindeks)
+
+gjerrig_kart <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_gjerrigindeks),
+               color = "black",
+               alpha = 0.8,
+               size = 0.1) +
+  geom_point(data = kommune_sentroide %>% arrange(desc(folketall)),
+             aes(x = x, y = y,
+                 size = folketall,
+                 fill = kategori_gjerrigindeks),
+             alpha = 0.03,
+             shape = 21,
+             show.legend = FALSE)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(1, 17)) +
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9))+
+    theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 16),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(2, 'cm'),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))
+
+```
+
+## Samlet
+
+```{r,fig.width=14,fig.height=8}
+plot_fantastisk <- 
+  ggpubr::ggarrange(
+    plot_inntekt, plot_fattigdom, plot_eiendomsskatt, gjerrig_kart, nrow = 1,
+    widths = c(1, 1, 1, 3),
+    common.legend = TRUE, legend = "top") +
+  labs(title = "Mange kommuner med fattigdom, har ogsaa lav eiendomsskatt",
+       subtitle = "Kommuner med hoy gjennomsnittsinntekt, men samtidig unodvendig hoy fattigdom og lav medianinntekt,\nbetegnes som politisk gjerrige*. Disse har ogsaa lavere eiendomsskatt enn andre kommuner.",
+       caption = "*Formel: Gjerrigindeks = Fattigdomsandel x (Gjennomsnittsinntekt - Medianinntekt).\nInntekt er maalt i bruttoinntekt per innbygger over 17 aar. Fattigdom er maalt i andel av\nbefolkningen som hadde en inntekt etter skatt paa under 60% av medianinntekten. Kilde: SSB")+
+  theme_bw()+
+  theme(legend.position="top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,10,0)),
+        text=element_text(family="Georgia"))
+
+plot_fantastisk
+
+ggsave("figur_gjerrighet_2023.png", width = 12, height = 8)
+```
+
+## Gjerrighet-skatt korrelasjon
+
+```{r}
+ggplot(gjerrig_data %>% 
+         filter(gjerrigindeks < 1.5) %>% 
+         drop_na(),
+       aes(x = gjerrigindeks,
+           y = eiendomsskatt_2023,
+           color = styringsparti,
+           label = kommune,
+           size = folketall)) +
+  geom_point(stat = "identity",
+             alpha = 0.5)+
+  geom_smooth(mapping = aes(weight = folketall),
+              method = "lm",
+              linetype = "dashed",
+              size = 2,
+              se = FALSE)+
+  scale_size("Folketall",
+             range = c(0,15))+
+  geom_text_repel(size = 2,
+                  segment.color = 'transparent')+
+#  scale_x_continuous(labels = percent_format(accuracy = 1),
+#                     limits = c(-0.055, 0.045),
+#                     breaks = seq(-100, 100, by = 0.01))+
+  scale_y_continuous(limits = c(0, 7),
+                     breaks = seq(0, 7, by = 1))+
+  scale_color_manual(values = c("dodgerblue3","springgreen3", "firebrick3"),
+                     labs(fill = "Blokktilhorighet\ntil ordforer"))+
+  labs(title = "Eiendomsskatten varierer ut fra\npolitisk og okonomiske omstendigheter",
+       subtitle = "Kommuner der venstresiden (R, SV, Ap) har ordforeren, er eiendomsskatten hoyere, men forskjellen\ntil kommuner styrt av hoyresiden (V, H, Frp) er storst naar det er mye unodvendig fattigdom.",
+       x = "\nUnodvendig fattigdomsindeks\n(  fattigdom x (gjennomsnittsinntekt - medianinntekt)  )",
+       y = "\nEiendomsskatt i promille\n")+
+  theme_bw()+
+  theme(legend.position = "right",
+        plot.title.position = "plot",
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        legend.text = element_text(size = 10),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,10,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+    guides(color = guide_legend(override.aes = aes(label = "", 
+                                                   alpha = 1,
+                                                   size=10)))
+
+ggsave("eiendomsskatt.png", height = 10, width = 10)
+```
+
+```{r}
+ggplot(gjerrig_data,
+       aes(x = inntekt_median,
+           y = eiendomsskatt_2023,
+           color = styringsparti,
+           label = kommune,
+           size = folketall)) +
+  geom_point(stat = "identity",
+             alpha = 0.5)+
+  geom_smooth(mapping = aes(weight = folketall),
+              method = "lm",
+              linetype = "dashed",
+              size = 2,
+              se = FALSE)+
+  scale_size("Folketall",
+             range = c(0,15))+
+  geom_text_repel(size = 2,
+                  segment.color = 'transparent')+
+#  scale_x_continuous(labels = percent_format(accuracy = 1),
+#                     limits = c(-0.055, 0.045),
+#                     breaks = seq(-100, 100, by = 0.01))+
+  scale_y_continuous(limits = c(0, 7),
+                     breaks = seq(0, 7, by = 1))+
+  scale_color_manual(values = c("dodgerblue3","springgreen3", "firebrick3"),
+                     labs(fill = "Blokktilhorighet\ntil ordforer"))+
+  labs(title = "Eiendomsskatten varierer ut fra\npolitisk og okonomiske omstendigheter",
+       subtitle = "Kommuner der venstresiden (R, SV, Ap) har ordforeren, er eiendomsskatten hoyere, men forskjellen\ntil kommuner styrt av hoyresiden (V, H, Frp) er storst naar det er mye unodvendig fattigdom.",
+       x = "\nMedianinntekt)  )",
+       y = "\nEiendomsskatt i promille\n")+
+  theme_bw()+
+  theme(legend.position = "right",
+        plot.title.position = "plot",
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        legend.text = element_text(size = 10),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 16,
+                                     margin=margin(10,0,20,0)),
+        text=element_text(family="Georgia"))+
+    guides(color = guide_legend(override.aes = aes(label = "", 
+                                                   alpha = 1,
+                                                   size=10)))
+
+ggsave("eiendomsskatt_medianinntekt.png", height = 10, width = 10)
+```
+
+
+```{r}
+p <- 
+gjerrig_data %>%
+  group_by(styringsparti) %>%
+  summarize(gjerrigindeks = cor(eiendomsskatt_2023, gjerrigindeks),
+            inntekt_gjennomsnitt = cor(eiendomsskatt_2023, inntekt_gjennomsnitt),
+            inntekt_median = cor(eiendomsskatt_2023, inntekt_median),
+            fattigdom = cor(eiendomsskatt_2023, fattigdom))
+
+writexl::write_xlsx(p,"test.xlsx")
+
+```
+
+
+# Annet
+
+# Geografisk stotte for omfordeling
+
+## Fylkeskoeffisienter
+
+```{r}
+#f staar for "frame"
+
+f <- data.frame(fylke = rownames(summary(model3)$coef),
+                 Coefficient = summary(model3)$coef[, 1],
+                 SE = summary(model3)$coef[, 2],
+                 Modelname = "Modell 3")
+
+f <- f %>% 
+  filter(fylke != "(Intercept)") %>% 
+  mutate(fylke = 
+           case_when(fylke == "finnmark" ~ "Finnmark",
+          fylke == "troms" ~ "Troms",
+          fylke == "nordland" ~ "Nordland",
+          fylke == "nord_trondelag" ~ "Nord-Trondelag",
+          fylke == "sor_trondelag" ~ "Sor-Trondelag",
+          fylke == "more_og_romsdal" ~ "More og Romsdal",
+          fylke == "sogn_og_fjordane" ~ "Sogn og Fjordane",
+          fylke == "hordaland" ~ "Hordaland",
+          fylke == "rogaland" ~ "Rogaland",
+          fylke == "vest_agder" ~ "Vest-Agder",
+          fylke == "aust_agder" ~ "Aust-Agder",
+          fylke == "telemark" ~ "Telemark",
+          fylke == "buskerud" ~ "Buskerud",
+          fylke == "vestfold" ~ "Vestfold",
+          fylke == "ostfold" ~ "ostfold",
+          fylke == "akershus" ~ "Akershus",
+          fylke == "oppland" ~ "Oppland",
+          fylke == "hedmark" ~ "Hedmark")) %>% 
+  filter(!is.na(fylke)) %>% 
+  arrange(fylke)
+
+f_order <- f %>% 
+  group_by(fylke) %>% 
+  arrange(fylke) %>% 
+  summarise(Order = mean(Coefficient)) %>% 
+  slice(rep(1:n(), each = 1))
+
+f$Size <- f_order$Order
+
+# Specify the width of your confidence intervals
+
+interval <- -qnorm((1-0.95)/2)  # 95% multiplier
+
+# Plot
+
+ggplot(f, 
+       aes(color = Modelname))+
+  geom_hline(yintercept = 0,
+             colour = gray(1/2),
+             lty = 2)+ 
+  geom_linerange(aes(x = reorder(fylke,Size),
+                     ymin = Coefficient - SE*interval,
+                     ymax = Coefficient + SE*interval),
+                 lwd = 1, 
+                 position = position_dodge(width = 0.8))+
+  geom_pointrange(aes(x = reorder(fylke,Size), 
+                      y = Coefficient, 
+                      ymin = Coefficient - SE*interval,
+                      ymax = Coefficient + SE*interval),
+                  lwd = 0.6, 
+                  size = 1,
+                  position = position_dodge(width = 0.8),
+                  shape = 16, 
+                  fill = "WHITE")+
+  scale_color_manual(values = c("#d7191c"))+
+  scale_y_continuous(limits = c(-13, 13),
+                     breaks = seq(-20, 20, by = 2))+
+  coord_flip()+
+  labs(title = "Modeller for kommune- og stortingsvalg siden 2005",
+       caption = "\nKilde: Statistisk sentralbyraa, Kommuneprofilen - Regio AS, Regionanalyse - Telemarksforsking, Kommunehelsa statistikkbank - FHI\n",
+       x = "\nValgdistrikter",
+       y = "\nProsentvis okning i venstresidens oppslutning\nved at en kommune er lokalisert i et bestemt fylk") +
+  theme_bw()+
+  theme(legend.position = "right",   #Legend on top
+        strip.text = element_text(size = 18),
+        axis.title = element_text(size = 18),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 13),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(20,0,20,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 12,
+                                     margin=margin(10,0,10,0)),
+        plot.caption = element_text(hjust = 1)
+        )
+
+ggsave("figur_fylke_koeffisienter.png", height = 12, width = 12)
+```
+
+## Fylkeskart
+
+```{r, fig.width=10, fig.height=10}
+analyse_data <- ekte_data %>% 
+    left_join(f, by = "fylke")
+  
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(analyse_data, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  select(group, lat, long, kode, kommune, Coefficient) %>% 
+  mutate(kategori_fylke = 
+           case_when(Coefficient > 5 ~ "Kulturellt\nveldig venstrevendt",
+                     Coefficient > 0 & Coefficient < 5 ~ "Kulturellt\nlitt venstrevendt",
+                     Coefficient < 0 & Coefficient > -5 ~ "Kulturellt\nlitt hoyrevendt",
+                     Coefficient < -5 ~ "Kulturellt\nveldig hoyrevendt"))
+
+kart_farger <- c("Kulturellt\nveldig venstrevendt" = "#b2182b",
+                 "Kulturellt\nlitt venstrevendt" = "#fddbc7",
+                 "Kulturellt\nlitt hoyrevendt" = "#d1e5f0",
+                 "Kulturellt\nveldig hoyrevendt" = "#4393c3")
+kart_fylke <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_fylke,
+                   text = paste0("Kommune: ", kommune, 
+                                 "\nKoeffisient: ", Coefficient,
+                                 "\nKategori: ", kategori_fylke)),
+               color = "black",
+               alpha = 0.8,
+               linewidth = 0) +
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Fylkenes politiske preferanser",
+       subtitle = "Fylker som dummy-variabel, kontrollert for sosiodemografiske variabler. Oslo er referansekategori.",
+       caption = "Kilde: Eget verk (2023).")+
+  theme_fivethirtyeight()+
+  theme(panel.grid.major = element_blank(),
+        axis.text = element_blank(),
+        legend.title = element_text(hjust = 0.5, size = 18),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5, size = 30,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5, size = 20,
+                                     margin=margin(20,0,0,0))
+        )+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 1, ncol = 4, byrow = FALSE))
+
+kart_fylke
+
+ggsave("kart_fylke.png", width = 10, height = 10)
+
+# Interaktiv figur
+
+library(plotly)
+
+figur <- ggplotly(kart_fylke, tooltip = "text")
+
+m <- list(
+  l = 50,
+  r = 50,
+  b = 50,
+  t = 50,
+  pad = 4
+)
+
+figur <- figur %>% 
+  layout(autosize = F, width = 900, height = 900, margin = m)
+
+htmlwidgets::saveWidget(as_widget(figur), "kart_fylke.html")
+```
+
+
+## Regionskart
+
+```{r}
+analyse_data <- ekte_data
+
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(analyse_data, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  filter(tid == 2021) %>%
+  select(group, lat, long, kode, kommune, landsdel)
+
+regionkart <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = landsdel),
+               color = "black",
+               alpha = 1,
+               size = 0.1) +
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Norges valgkretser",
+       caption = "Kilde: Regjeringen.no")+
+  theme_fivethirtyeight()+
+  theme(panel.grid.major = element_blank(),
+        axis.text = element_blank(),
+        legend.title = element_text(hjust = 0.5, size = 18),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5, size = 30,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5, size = 20,
+                                     margin=margin(20,0,0,0))
+        )+
+  guides(fill="none")
+
+ggsave("figur_valgkretser.png", width = 10, height = 10)
+```
+
+
+## Forurensende kommuner
+
+## 2021
+
+```{r}
+analyse_data <- ekte_data %>%   
+  group_by(kommune, kode) %>%
+  summarize(mean_logutslipp = mean(logutslipp),
+            mean_utslipp = mean(utslipp))
+
+ggplot(analyse_data, aes(mean_utslipp))+
+  geom_density(kernel = "gaussian")+
+  scale_x_continuous(limits = c(0,0.1),
+                     breaks = seq(0, 1, by = 0.01))
+
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(analyse_data, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  select(group, lat, long, kode, kommune,
+         mean_utslipp) %>% 
+  mutate(kategori = 
+           case_when(mean_utslipp >= 0.04 ~ "Forurensende\nkommune",
+                     mean_utslipp < 0.04 & mean_utslipp >= 0.03 ~ "Litt forurensende\nkommune",
+                     mean_utslipp < 0.03 & mean_utslipp >= 0.02 ~ "Hverken forurensende\neller miljovennlig",
+                     mean_utslipp < 0.02 & mean_utslipp >= 0.01 ~ "Litt miljovennlig\nkommune",
+                     mean_utslipp < 0.01 ~ "Miljovennlig\nkommune"))
+```
+
+```{r}
+kart_farger <- c("Miljovennlig\nkommune" = "#2166ac",
+                 "Litt miljovennlig\nkommune" = "#67a9cf",
+                 "Hverken forurensende\neller miljovennlig" = "white",
+                 "Litt forurensende\nkommune" = "#ef8a62",
+                 "Forurensende\nkommune" = "#b2182b")
+
+kategori_miljo_2021 <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori),
+               color = "black",
+               alpha = 0.8,
+               size = 0.1) +
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Norges gniene kommuner",
+       subtitle = "Kommuner med hoy fattigdom og lav medianinntekt, men \nsamtidig hoy gjennomsnittsinntekt, betegnes som gniene*.",
+       caption = "Kilde: Statistisk sentralbyraa                                                                                   *Formel: gjerrigindeks = Fattigdomsandel x (Gjennomsnittsinntekt - Medianinntekt).\nInntekt er maalt i bruttoinntekt per innbygger over 17 aar. Fattigdom er maalt i andel av\nbefolkningen som hadde en inntekt etter skatt paa under 60% av medianinntekten.")+
+  theme_fivethirtyeight()+
+  theme(panel.grid.major = element_blank(),
+        axis.text = element_blank(),
+        legend.title = element_text(hjust = 0.5, size = 18),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5, size = 30,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5, size = 20,
+                                     margin=margin(20,0,0,0))
+        )+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 1, byrow = FALSE))
+
+kategori_miljo_2021
+
+ggsave("kategori_miljo_2021.png", width = 10, height = 10)
+```
+
+
+## 2005
+
+```{r}
+analyse_data <- ekte_data
+
+kart_data <- splmaps::nor_lau2_map_b2020_spli<t_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(analyse_data, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  filter(tid == 2005) %>%
+  select(group, lat, long, kode, kommune, folketall,
+         gjerrigindeks) %>% 
+  mutate(kategori_gjerrigindeks = 
+           case_when(gjerrigindeks > 1.0000000 ~ "Gnien kommune",
+                     gjerrigindeks < 1.0000000 ~ "Ikke gnien kommune"))
+
+kommune_sentroide <- 
+  summarize(group_by(analyse_data, kode),
+            x = mean(range(long)),
+            y = mean(range(lat)),
+            folketall = folketall,
+            kategori_gjerrigindeks = kategori_gjerrigindeks)
+```
+
+```{r}
+kart_farger <- c("Gnien kommune" = "#b2182b",
+                 "Ikke gnien kommune" = "#4393c3")
+
+kategori_gjerrigindeks_2005 <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_gjerrigindeks),
+               color = "gray40",
+               alpha = 0.8,
+               size = 0.05) +
+  geom_point(data = kommune_sentroide %>% arrange(desc(folketall)),
+             aes(x = x, y = y,
+                 size = folketall,
+                 fill = kategori_gjerrigindeks),
+             alpha = 0.03,
+             shape = 21,
+             show.legend = FALSE)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Gniene kommuner i 2005",
+       subtitle = "Kommuner med hoy fattigdom og lav medianinntekt,\nmen samtidig hoy gjennomsnittsinntekt.",
+       caption = "Kilde: Statistisk sentralbyraa")+
+  theme_fivethirtyeight()+
+  theme(panel.grid.major = element_blank(),
+        axis.text = element_blank(),
+        legend.title = element_text(hjust = 0.5, size = 18),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5, size = 30,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5, size = 20,
+                                     margin=margin(20,0,0,0))
+        )+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 2))
+
+ggsave("gniene_kommuner_2005.png", width = 10, height = 10)
+```
+
+## 2013
+
+```{r}
+analyse_data <- ekte_data
+
+kart_data <- splmaps::nor_lau2_map_b2020_split_dt %>% 
+  rename(kode = location_code) %>%
+  mutate(kode = substring(kode, 8),
+         kode = as.numeric(kode)) %>% 
+  select(group, long, lat, kode) %>% 
+  left_join(analyse_data, by = "kode")
+
+analyse_data <- 
+  kart_data %>% 
+  filter(tid == 2013) %>%
+  select(group, lat, long, kode, kommune, folketall,
+         gjerrigindeks) %>% 
+  mutate(kategori_gjerrigindeks = 
+           case_when(gjerrigindeks > 1.3413372 ~ "Gnien kommune",
+                     gjerrigindeks < 1.3413372 ~ "Ikke gnien kommune"))
+
+kommune_sentroide <- 
+  summarize(group_by(analyse_data, kode),
+            x = mean(range(long)),
+            y = mean(range(lat)),
+            folketall = folketall,
+            kategori_gjerrigindeks = kategori_gjerrigindeks)
+```
+
+```{r}
+kart_farger <- c("Gnien kommune" = "#b2182b",
+                 "Ikke gnien kommune" = "#4393c3")
+
+kategori_gjerrigindeks_2013 <- 
+  ggplot()+
+  geom_polygon(data = analyse_data,
+               aes(x = long, y = lat,
+                   group = group,
+                   fill = kategori_gjerrigindeks),
+               color = "gray40",
+               alpha = 0.8,
+               size = 0.05) +
+  geom_point(data = kommune_sentroide %>% arrange(desc(folketall)),
+             aes(x = x, y = y,
+                 size = folketall,
+                 fill = kategori_gjerrigindeks),
+             alpha = 0.03,
+             shape = 21,
+             show.legend = FALSE)+
+  scale_fill_manual(values = kart_farger,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  scale_color_manual(values = kart_farger,
+                     na.value = "gray40",
+                     labs(label = ""))+
+  scale_size_continuous(range = c(2, 17)) + 
+  coord_cartesian(ylim = c(58.3, 65.5), xlim = c(-1.8, 13.9)) +
+  labs(title = "Gniene kommuner i 2013",
+       subtitle = "Kommuner med hoy fattigdom og lav medianinntekt,\nmen samtidig hoy gjennomsnittsinntekt.",
+       caption = "Kilde: Statistisk sentralbyraa")+
+  theme_fivethirtyeight()+
+  theme(panel.grid.major = element_blank(),
+        axis.text = element_blank(),
+        legend.title = element_text(hjust = 0.5, size = 18),
+        legend.text = element_text(size = 16),
+        legend.key.height = unit(1, 'cm'),
+        plot.title = element_text(hjust = 0.5, size = 30,
+                                  margin=margin(10,0,0,0)),
+        plot.subtitle = element_text(hjust = 0.5, size = 20,
+                                     margin=margin(20,0,0,0))
+        )+
+    guides(color = guide_legend(override.aes = list(alpha = 1)),
+           fill = guide_legend(nrow = 2))
+
+ggsave("gniene_kommuner_2013.png", width = 10, height = 10)
+```
+
+
+## Venstre = Sosiodemografi x agenda
+
+```{r}
+# Skalerer forst, saa legger til vekt
+
+#regresjon_data <- 
+  ekte_data %>% 
+  rename(medianinntekt = inntekt_median, #Variabler kan ikke ha understrek
+         ytrevenstre = ytre_venstre) %>% 
+  select(kommune, tid, ytrevenstre, venstre, utdanning, kvinner, 
+         arbeidsledighet, offentlig, fattigdom, ulikhet, eldre, pendling,
+         innvandring, landbruk, petroleum, medianinntekt, folketall, fertilitet,
+         hregjering, apregjering, sentralitet) %>% 
+  pivot_wider(
+    names_from = tid,
+    names_sep = "_", #Understrek brukes til aa skille aarstall
+    values_from = c(ytrevenstre:sentralitet)) %>% 
+  select(-kommune) %>% 
+  scale() %>% 
+  as.data.frame() 
+
+kommune <- ekte_data %>% 
+  select(kommune) %>% 
+  unique()
+
+regresjon_data$kommune <- kommune$kommune
+
+regresjon_data <- regresjon_data %>% 
+  pivot_longer(
+    cols = c(1:162),
+    names_sep =  "_",
+    names_to = c("variabel","tid"),
+    values_to = "verdi") %>% 
+  pivot_wider(names_from = "variabel",
+              values_from = "verdi")
+
+regresjon_data$ytrevenstre <- ekte_data$ytre_venstre*100 #prosentvis verdi
+regresjon_data$venstre <- ekte_data$venstre*100 #prosentvis verdi
+
+regresjon_data$trondelag <- ekte_data$trondelag
+regresjon_data$innlandet <- ekte_data$innlandet
+regresjon_data$sorostnorge <- ekte_data$sorostnorge
+regresjon_data$vestlandet <- ekte_data$vestlandet
+regresjon_data$sorlandet <- ekte_data$sorlandet
+regresjon_data$nordnorge <- ekte_data$nordnorge
+regresjon_data$apregjering <- ekte_data$apregjering
+regresjon_data$hregjering <- ekte_data$hregjering
+regresjon_data$litenkommune <- ekte_data$litenkommune
+
+analyse_data <- regresjon_data
+
+model1 <- lm(venstre ~ fattigdom+ulikhet+sentralitet+utdanning+
+               eldre+innvandring+kvinner+landbruk+petroleum+arbeidsledighet+
+               fertilitet+hregjering,
+             data = analyse_data,
+             weights = ,
+             na.action = "na.exclude")
+
+model2 <- lm(venstre ~ medianinntekt+ulikhet+sentralitet+utdanning+
+               eldre+innvandring+kvinner+landbruk+petroleum+arbeidsledighet+
+               fertilitet+hregjering,
+             data = analyse_data,
+             na.action = "na.exclude")
+
+
+# Tabell
+
+stargazer(model1, model2, #Including all the models
+          out = "sosiodemografi_agenda.txt",
+          type = "text",   #Printing text edition
+          report = "vc*p",
+          title = "Resulateter fra standardisert regresjonsanalyse")
+```
+
+## ChatGPT
+
+```{r}
+# Load the necessary libraries
+library(ggplot2)
+library(ggpubr)
+
+# Create a data frame with the sample values and labels
+data <- data.frame(
+  category = c("Category A", "Category B", "Category C", "Category D"),
+  value = c(25, 35, 15, 25)
+)
+
+# Reorder the levels of the "category" factor based on the values
+data$category <- factor(data$category, levels = data$category[order(data$value)])
+
+# Create the pie chart using ggplot2
+pie_chart <- ggplot(data, aes(x = "", y = value, fill = category)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  labs(fill = "Category") +
+  theme_void() +
+  theme(legend.position = "top")
+
+# Create the sidewise bar plot using ggplot2
+bar_plot <- ggplot(data, aes(x = category, y = value, fill = category)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# Combine the legends at the top
+combined_plot <- ggarrange(pie_chart, bar_plot, nrow = 1, ncol = 2, widths = c(3, 2),
+                           common.legend = TRUE, legend = "top")
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
